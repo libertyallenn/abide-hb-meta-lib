@@ -1,83 +1,93 @@
-import argparse
 import os
 import os.path as op
 from glob import glob
 
+import pandas as pd
 import nibabel as nib
 import numpy as np
 from matplotlib import pyplot as plt
+from nilearn.input_data import NiftiMasker
 from nilearn.connectome import ConnectivityMeasure
-from nimare.correct import FWECorrector
-from nimare.io import convert_sleuth_to_dataset
-from nimare.meta.cbma import ALE
-from nimare.meta.kernel import ALEKernel
-from sklearn.cluster import AgglomerativeClustering, KMeans
+from sklearn.cluster import KMeans
 
 from utils import get_peaks, thresh_img
 
-project_dir = "/home/data/nbc/misc-projects/meta-analyses/Hampson_rdoc-meta-analysis"
-
-# clustering
-all_txts = glob(op.join(project_dir, "text-files", "*.txt"))
-
-output_dir = op.join(project_dir, "k_clustering", "clustering_856")
+# Define input/output paths
+project_dir = "/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta"
+#metadata_file = op.join(project_dir, "derivatives/sub-group_task-rest_desc-1S2StTesthabenula_zmaps.txt") 
+metadata_file = op.join(project_dir, "derivatives/sub-group_task-rest_desc-1S2StTesthabenula_conntabletest.txt")
+base_rsfc_dir = "/home/data/nbc/Laird_ABIDE/dset/derivatives/rsfc-habenula"
+output_dir = op.join(project_dir, "k_clustering", "hb_clustering_zmaps_asd")
 os.makedirs(output_dir, exist_ok=True)
 
-dset = convert_sleuth_to_dataset(all_txts, target="mni152_2mm")
-dset.save(op.join(output_dir, "social-rdoc.pkl.gz"))
+# -----------------------------------------
+# Step 1: Load and filter metadata
+# -----------------------------------------
+df = pd.read_csv(metadata_file, sep="\t", comment="#")
+df_asd = df[df["group"] == "asd"].copy()
 
-k = ALEKernel()
-time_series = np.transpose(k.transform(dset, return_type="array"))
+print(df_asd)
+
+# Full z-map path for each ASD subject
+#df_asd["zmap_path"] = df_asd["InputFile"].apply(lambda x: op.join(base_rsfc_dir, x.lstrip("/")))
+df_asd["zmap_path"] = df_asd["InputFile"].str.replace(
+    "^/rsfc/", "/home/data/nbc/Laird_ABIDE/dset/derivatives/rsfc-habenula/", regex=True
+)
+
+
+# Keep only entries where the zmap file exists
+#df_asd = df_asd[df_asd["zmap_path"].apply(op.exists)]
+
+print(df_asd)
+
+# Create list of z-map paths and subject IDs
+z_maps = df_asd["zmap_path"].tolist()
+subject_ids = df_asd["Subj"].tolist()
+
+print(f"Found {len(z_maps)} ASD subjects with valid z-maps.")
+
+# -----------------------------------------
+# Step 2: Load and prepare data
+# -----------------------------------------
+masker = NiftiMasker(mask_strategy="background", standardize=True)
+data_matrix = masker.fit_transform(z_maps)  # shape: (n_subjects, n_voxels)
+
+# Compute correlation matrix (subject similarity)
 correlation = ConnectivityMeasure(kind="correlation")
-corrmat = correlation.fit_transform([time_series])[0]
+corrmat = correlation.fit_transform([data_matrix])[0]
 
-for d in range(1, 2, 1):
-
+# -----------------------------------------
+# Step 3: Run KMeans clustering
+# -----------------------------------------
+for d in range(2, 7):  # cluster solutions: k=2 to k=6
     clustering = KMeans(n_clusters=d, n_init=100, max_iter=1000, random_state=0)
-    corrmat_cluster_labels = clustering.fit(1 - corrmat).labels_
-    tmp_output_dir = op.join(output_dir, "cluster_{}".format(d))
+    cluster_labels = clustering.fit(1 - corrmat).labels_
+
+    tmp_output_dir = op.join(output_dir, f"cluster_{d}")
     os.makedirs(tmp_output_dir, exist_ok=True)
 
-    for a in range(np.max(corrmat_cluster_labels) + 1):
+    for a in range(d):
+        cluster_indices = np.where(cluster_labels == a)[0]
+        cluster_zs = [z_maps[i] for i in cluster_indices]
 
-        tmp_dset = dset.slice(dset.annotations.id[np.where(corrmat_cluster_labels == a)[0]])
+        # Average z-map for this cluster
+        cluster_data = masker.transform(cluster_zs)
+        cluster_mean = np.mean(cluster_data, axis=0)
+        cluster_mean_img = masker.inverse_transform(cluster_mean)
 
-        ale = ALE()
+        # Save average z-map
+        mean_img_path = op.join(tmp_output_dir, f"cluster_{a}_mean_zmap.nii.gz")
+        cluster_mean_img.to_filename(mean_img_path)
 
-        results = ale.fit(tmp_dset)
-        corr = FWECorrector(method="montecarlo", n_iters=5000, voxel_thresh=0.001, n_cores=12)
-        cres = corr.transform(results)
+        # Threshold and save
+        z_img_thresh = thresh_img(cluster_mean_img, cluster_mean_img, 0.001)
+        z_thresh_path = op.join(tmp_output_dir, f"cluster_{a}_z_thresh-001.nii.gz")
+        nib.save(z_img_thresh, z_thresh_path)
 
-        cres.save_maps(output_dir=tmp_output_dir, prefix="cluster_{}".format(a))
+        # Extract peaks
+        get_peaks(z_thresh_path, tmp_output_dir)
 
-        tmp_dset.save(op.join(tmp_output_dir, "cluster_{}.pkl.gz".format(a)))
-
-        z_img_logp = nib.load(
-            op.join(
-                tmp_output_dir,
-                "{prefix}_logp_desc-mass_level-cluster_corr-FWE_method-montecarlo.nii.gz".format(
-                    prefix="cluster_{}".format(a)
-                ),
-            )
-        )
-        z_img = nib.load(
-            op.join(tmp_output_dir, "{prefix}_z.nii.gz".format(prefix="cluster_{}".format(a)))
-        )
-        z_img_thresh = thresh_img(z_img_logp, z_img, 0.001)
-        nib.save(
-            z_img_thresh,
-            op.join(
-                tmp_output_dir,
-                "{prefix}_z_corr-cFWE_thresh-001.nii.gz".format(prefix="cluster_{}".format(a)),
-            ),
-        )
-
-        get_peaks(
-            op.join(
-                tmp_output_dir,
-                "{prefix}_z_corr-cFWE_thresh-001.nii.gz".format(prefix="cluster_{}".format(a)),
-            ),
-            tmp_output_dir,
-        )
-
-        # decode(op.join(tmp_output_dir, '{prefix}_z.nii.gz'.format(prefix='cluster_{}'.format(a))))
+        # Save subject list for this cluster
+        with open(op.join(tmp_output_dir, f"cluster_{a}_subject_ids.txt"), "w") as f:
+            for idx in cluster_indices:
+                f.write(subject_ids[idx] + "\n")
