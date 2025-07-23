@@ -64,7 +64,6 @@ def decode(img_decode):
 
 
 def get_peaks(img_file, output_dir):
-
     # get cluster + peak information from image
     stat_img = nib.load(img_file)
     if np.nonzero(stat_img.get_fdata())[0].any():
@@ -88,16 +87,12 @@ def get_peaks(img_file, output_dir):
             min_distance=min_distance,
         )
 
-        for i, row in peaks_frame.iterrows():
-            tmplabel = row["aal"]
-            if i == 0:
-                if tmplabel.split("_")[-1] in ["L", "R"]:
-                    hemis = [tmplabel.split("_")[-1]]
-                    labels = [" ".join(tmplabel.split("_")[:-1])]
-                else:
-                    hemis = [""]
-                    labels = [" ".join(tmplabel.split("_"))]
-            else:
+        # Only proceed if peaks_frame is not empty
+        if not peaks_frame.empty:
+            hemis = []
+            labels = []
+            for i, row in peaks_frame.iterrows():
+                tmplabel = row["aal"]
                 if tmplabel.split("_")[-1] in ["L", "R"]:
                     hemis.append(tmplabel.split("_")[-1])
                     labels.append(" ".join(tmplabel.split("_")[:-1]))
@@ -105,25 +100,29 @@ def get_peaks(img_file, output_dir):
                     hemis.append("")
                     labels.append(" ".join(tmplabel.split("_")))
 
-        peaks_frame["Hemisphere"] = hemis
-        peaks_frame["Label"] = labels
-        peaks_frame = peaks_frame.drop(columns=["aal"])
-        peaks_frame = peaks_frame.rename(
-            columns={
-                "cluster_id": "Cluster",
-                "peak_x": "x",
-                "peak_y": "y",
-                "peak_z": "z",
-                "peak_value": "Value",
-                "volume_mm": "Volume (mm^3)",
-            }
-        )
+            peaks_frame["Hemisphere"] = hemis
+            peaks_frame["Label"] = labels
+            peaks_frame = peaks_frame.drop(columns=["aal"])
+            peaks_frame = peaks_frame.rename(
+                columns={
+                    "cluster_id": "Cluster",
+                    "peak_x": "x",
+                    "peak_y": "y",
+                    "peak_z": "z",
+                    "peak_value": "Value",
+                    "volume_mm": "Volume (mm^3)",
+                }
+            )
 
-        # write output .csv files
-        print(out_fn)
-        peaks_frame.to_csv(out_fn, index=False, float_format="%5g")
+            # write output .csv files
+            print(out_fn)
+            peaks_frame.to_csv(out_fn, index=False, float_format="%5g")
 
-        return peaks_frame
+            return peaks_frame
+        else:
+            print(f"No peaks found for {img_file}")
+            return None
+
 
 
 def thresh_img(logp_img, z_img, p):
