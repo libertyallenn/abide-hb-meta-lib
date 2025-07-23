@@ -8,8 +8,8 @@ from nimare.meta.kernel import ALEKernel
 
 import metrics
 
-project_dir = "/home/data/nbc/misc-projects/meta-analyses/Hampson_rdoc-meta-analysis"
-clustering_dir = op.join(project_dir, "k_clustering", "clustering_856")
+project_dir = "/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta"
+clustering_dir = op.join(project_dir, "derivatives", "k_clustering")
 
 dset = Dataset.load(op.join(clustering_dir, "social-rdoc.pkl.gz"))
 k = ALEKernel()
