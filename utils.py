@@ -125,13 +125,24 @@ def get_peaks(img_file, output_dir):
 
 
 
-def thresh_img(logp_img, z_img, p):
-    sig_inds = np.where(logp_img.get_fdata() > -np.log10(p))
-    z_img_data = z_img.get_fdata()
-    z_img_thresh_data = np.zeros(z_img.shape)
-    z_img_thresh_data[sig_inds] = z_img_data[sig_inds]
-    z_img = nib.Nifti1Image(z_img_thresh_data, z_img.affine)
-    return z_img
+# def thresh_img(logp_img, z_img, p):
+#     sig_inds = np.where(logp_img.get_fdata() > -np.log10(p))
+#     z_img_data = z_img.get_fdata()
+#     z_img_thresh_data = np.zeros(z_img.shape)
+#     z_img_thresh_data[sig_inds] = z_img_data[sig_inds]
+#     z_img = nib.Nifti1Image(z_img_thresh_data, z_img.affine)
+#     return z_img
+
+def thresh_img(img, threshold):
+    """
+    Threshold an image based on absolute value.
+    Keeps voxels where |value| > threshold.
+    """
+    data = img.get_fdata()
+    thresh_data = np.zeros_like(data)
+    thresh_data[np.abs(data) > threshold] = data[np.abs(data) > threshold]
+    return nib.Nifti1Image(thresh_data, img.affine)
+
 
 
 def plot_dendrogram(model, **kwargs):
