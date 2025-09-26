@@ -8,8 +8,8 @@
 #SBATCH --qos=pq_nbc
 #SBATCH --partition=IB_40C_512G
 # Outputs ----------------------------------
-#SBATCH --output=/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta/log/%x/%x_%A-%a.out
-#SBATCH --error=/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta/log/%x/%x_%A-%a.err
+#SBATCH --output=/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta-lib/log/%x/%x_%A-%a.out
+#SBATCH --error=/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta-lib/log/%x/%x_%A-%a.err
 # ------------------------------------------
 # Max # CPUs = 360
 # modified from ABIDE workflow
@@ -24,7 +24,7 @@ set -e
 module load miniconda3-4.5.11-gcc-8.2.0-oqs2mbg
 source activate /home/champ007/kmeans_env
 
-PROJECT_DIR="/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta"
+PROJECT_DIR="/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta-lib"
 
 # Setup done, run the command
 cmd="python ${PROJECT_DIR}/kmeans-workflow.py \
