@@ -112,7 +112,9 @@ class HabenulaClustering:
 
         return self
 
-    def prepare_data_matrix(self, mask_strategy="whole-brain-template", standardize=True):
+    def prepare_data_matrix(
+        self, mask_strategy="whole-brain-template", standardize=True
+    ):
         """Convert connectivity maps to data matrix for clustering"""
 
         print("Creating data matrix from connectivity maps...")
@@ -159,7 +161,9 @@ class HabenulaClustering:
         fig, axes = plt.subplots(2, 2, figsize=(15, 12))
 
         # 1. Basic heatmap
-        im1 = axes[0, 0].imshow(self.similarity_matrix, cmap="RdBu_r", vmin=-0.4, vmax=0.4)
+        im1 = axes[0, 0].imshow(
+            self.similarity_matrix, cmap="RdBu_r", vmin=-0.4, vmax=0.4
+        )
         axes[0, 0].set_title("Participant Similarity Matrix")
         axes[0, 0].set_xlabel("Participant Index")
         axes[0, 0].set_ylabel("Participant Index")
@@ -193,15 +197,29 @@ class HabenulaClustering:
         upper_tri_sims = self.similarity_matrix[mask]
 
         axes[1, 1].hist(upper_tri_sims, bins=50, alpha=0.7, edgecolor="black")
-        axes[1, 1].axvline(np.mean(upper_tri_sims), color="red", linestyle="--", label=f"Mean: {np.mean(upper_tri_sims):.3f}")
-        axes[1, 1].axvline(np.median(upper_tri_sims), color="orange", linestyle="--", label=f"Median: {np.median(upper_tri_sims):.3f}")
+        axes[1, 1].axvline(
+            np.mean(upper_tri_sims),
+            color="red",
+            linestyle="--",
+            label=f"Mean: {np.mean(upper_tri_sims):.3f}",
+        )
+        axes[1, 1].axvline(
+            np.median(upper_tri_sims),
+            color="orange",
+            linestyle="--",
+            label=f"Median: {np.median(upper_tri_sims):.3f}",
+        )
         axes[1, 1].set_xlabel("Pairwise Similarity")
         axes[1, 1].set_ylabel("Frequency")
         axes[1, 1].set_title("Distribution of Participant Similarities")
         axes[1, 1].legend()
 
         plt.tight_layout()
-        plt.savefig(op.join(self.figures_dir, "similarity_analysis.png"), dpi=300, bbox_inches="tight")
+        plt.savefig(
+            op.join(self.figures_dir, "similarity_analysis.png"),
+            dpi=300,
+            bbox_inches="tight",
+        )
         plt.show()
 
         # Create separate hierarchically clustered heatmap
@@ -216,39 +234,38 @@ class HabenulaClustering:
             cbar_kws={"label": "Correlation"},
         )
         g.ax_heatmap.set_title("Hierarchically Clustered Similarity Matrix")
-        g.savefig(op.join(self.figures_dir, "similarity_clustered.png"), dpi=300, bbox_inches="tight")
+        g.savefig(
+            op.join(self.figures_dir, "similarity_clustered.png"),
+            dpi=300,
+            bbox_inches="tight",
+        )
         plt.show()
 
         return self
 
     def determine_optimal_clusters(self, k_range, methods=["silhouette", "elbow"]):
-        """Determine optimal number of clusters using similarity matrix (distance-based)"""
+        """Determine optimal number of clusters using data matrix clustering with similarity-based metrics"""
 
         print("Determining optimal number of clusters...")
-
-        # Convert similarity to distance
-        distance_matrix = 1 - self.similarity_matrix
-
-        # Reduce dimensionality (PCA on distance matrix)
-        pca = PCA(n_components=min(50, distance_matrix.shape[0] // 2))
-        reduced_data = pca.fit_transform(distance_matrix)
 
         self.cluster_metrics = {}
 
         for k in k_range:
             print(f"  Testing k={k}...")
 
+            # Cluster directly on data matrix
             kmeans = KMeans(n_clusters=k, n_init=100, max_iter=1000, random_state=42)
-            labels = kmeans.fit_predict(reduced_data)
+            labels = kmeans.fit_predict(self.data_matrix)
 
-            # Silhouette
+            # Calculate metrics using original data matrix
             if "silhouette" in methods:
-                sil_score = silhouette_score(reduced_data, labels)
+                # Use original data matrix for silhouette calculation
+                sil_score = silhouette_score(self.data_matrix, labels)
                 if k not in self.cluster_metrics:
                     self.cluster_metrics[k] = {}
                 self.cluster_metrics[k]["silhouette"] = sil_score
 
-            # Elbow (inertia)
+            # Elbow (inertia) from the data matrix clustering
             if "elbow" in methods:
                 inertia = kmeans.inertia_
                 if k not in self.cluster_metrics:
@@ -273,11 +290,21 @@ class HabenulaClustering:
             # Highlight optimal k
             if method == "silhouette":
                 optimal_k = k_values[np.argmax(metric_values)]
-                axes[i].axvline(optimal_k, color="red", linestyle="--", alpha=0.7, label=f"Optimal k={optimal_k}")
+                axes[i].axvline(
+                    optimal_k,
+                    color="red",
+                    linestyle="--",
+                    alpha=0.7,
+                    label=f"Optimal k={optimal_k}",
+                )
                 axes[i].legend()
 
         plt.tight_layout()
-        plt.savefig(op.join(self.figures_dir, "cluster_validation.png"), dpi=300, bbox_inches="tight")
+        plt.savefig(
+            op.join(self.figures_dir, "cluster_validation.png"),
+            dpi=300,
+            bbox_inches="tight",
+        )
         plt.show()
 
         # Print recommendations and save to file
@@ -285,7 +312,12 @@ class HabenulaClustering:
         with open(results_path, "w") as f:
             f.write("Cluster validation results:\n")
             for k in sorted(self.cluster_metrics.keys()):
-                metrics_str = ", ".join([f"{metric}: {value:.3f}" for metric, value in self.cluster_metrics[k].items()])
+                metrics_str = ", ".join(
+                    [
+                        f"{metric}: {value:.3f}"
+                        for metric, value in self.cluster_metrics[k].items()
+                    ]
+                )
                 print(f"  k={k}: {metrics_str}")
                 f.write(f"k={k}: {metrics_str}\n")
 
@@ -301,30 +333,26 @@ class HabenulaClustering:
         return self
 
     def perform_clustering(self, k_values):
-        """Cluster participants using similarity matrix; still compute voxel centroids."""
+        """Cluster participants using data matrix directly; compute voxel centroids."""
 
-        print("Performing k-means clustering (similarity-based)...")
-
-        # Convert similarity to distance
-        distance_matrix = 1 - self.similarity_matrix
-
-        # PCA reduction
-        pca = PCA(n_components=min(50, distance_matrix.shape[0] // 2))
-        reduced_data = pca.fit_transform(distance_matrix)
+        print("Performing k-means clustering (data matrix-based)...")
 
         self.clustering_results = {}
 
         for k in k_values:
             print(f"  Clustering with k={k}...")
 
-            # Cluster using reduced distance
+            # Cluster directly on data matrix
             kmeans = KMeans(n_clusters=k, n_init=100, max_iter=1000, random_state=42)
-            labels = kmeans.fit_predict(reduced_data)
+            labels = kmeans.fit_predict(self.data_matrix)
+
+            # Calculate silhouette score using original data matrix
+            silhouette = silhouette_score(self.data_matrix, labels)
 
             self.clustering_results[k] = {
                 "labels": labels,
                 "model": kmeans,
-                "silhouette": silhouette_score(reduced_data, labels),
+                "silhouette": silhouette,
             }
 
             # Create output directory for this k
@@ -334,7 +362,9 @@ class HabenulaClustering:
             # Analyze each cluster
             for cluster_id in range(k):
                 cluster_mask = labels == cluster_id
-                cluster_subjects = [self.subject_ids[i] for i in range(len(labels)) if cluster_mask[i]]
+                cluster_subjects = [
+                    self.subject_ids[i] for i in range(len(labels)) if cluster_mask[i]
+                ]
 
                 print(f"    Cluster {cluster_id}: {len(cluster_subjects)} participants")
 
@@ -344,40 +374,56 @@ class HabenulaClustering:
                 centroid_img = self.masker.inverse_transform(cluster_centroid)
 
                 # Save centroid beta map
-                centroid_path = op.join(k_output_dir, f"cluster_{cluster_id}_centroid_beta.nii.gz")
+                centroid_path = op.join(
+                    k_output_dir, f"cluster_{cluster_id}_centroid_beta.nii.gz"
+                )
                 nib.save(centroid_img, centroid_path)
 
                 # Threshold beta map (absolute threshold)
                 beta_thresh_value = 0.2
                 beta_thresh_img = thresh_img(centroid_img, beta_thresh_value)
-                beta_thresh_path = op.join(k_output_dir, f"cluster_{cluster_id}_beta_thresh-{beta_thresh_value}.nii.gz")
+                beta_thresh_path = op.join(
+                    k_output_dir,
+                    f"cluster_{cluster_id}_beta_thresh-{beta_thresh_value}.nii.gz",
+                )
                 nib.save(beta_thresh_img, beta_thresh_path)
 
                 # Convert beta centroid to Z-map
                 centroid_data = centroid_img.get_fdata()
                 z_data = (centroid_data - self.global_mean) / self.global_std
                 z_img = nib.Nifti1Image(z_data, centroid_img.affine)
-                z_path = op.join(k_output_dir, f"cluster_{cluster_id}_centroid_zmap.nii.gz")
+                z_path = op.join(
+                    k_output_dir, f"cluster_{cluster_id}_centroid_zmap.nii.gz"
+                )
                 nib.save(z_img, z_path)
 
                 # Threshold Z-map (statistical threshold)
                 z_thresh_value = 3.09  # ~p<0.001
                 z_thresh_img = thresh_img(z_img, z_thresh_value)
-                z_thresh_path = op.join(k_output_dir, f"cluster_{cluster_id}_z_thresh-{z_thresh_value}.nii.gz")
+                z_thresh_path = op.join(
+                    k_output_dir,
+                    f"cluster_{cluster_id}_z_thresh-{z_thresh_value}.nii.gz",
+                )
                 nib.save(z_thresh_img, z_thresh_path)
 
                 # Save participant list
-                subjects_file = op.join(k_output_dir, f"cluster_{cluster_id}_participants.txt")
+                subjects_file = op.join(
+                    k_output_dir, f"cluster_{cluster_id}_participants.txt"
+                )
                 with open(subjects_file, "w") as f:
                     for subj in cluster_subjects:
                         f.write(f"{subj}\n")
 
             # Save cluster assignments
-            assignments_df = pd.DataFrame({"subject_id": self.subject_ids, "cluster": labels})
+            assignments_df = pd.DataFrame(
+                {"subject_id": self.subject_ids, "cluster": labels}
+            )
             assignments_file = op.join(k_output_dir, f"cluster_assignments_k_{k}.csv")
             assignments_df.to_csv(assignments_file, index=False)
 
-            print(f"    Silhouette score: {self.clustering_results[k]['silhouette']:.3f}")
+            print(
+                f"    Silhouette score: {self.clustering_results[k]['silhouette']:.3f}"
+            )
 
         return self
 
@@ -399,9 +445,15 @@ class HabenulaClustering:
             pca = PCA(n_components=2)
             data_2d = pca.fit_transform(self.data_matrix)
 
-            scatter = axes[0, 0].scatter(data_2d[:, 0], data_2d[:, 1], c=labels, cmap="tab10", alpha=0.7)
-            axes[0, 0].set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.1%} variance)")
-            axes[0, 0].set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.1%} variance)")
+            scatter = axes[0, 0].scatter(
+                data_2d[:, 0], data_2d[:, 1], c=labels, cmap="tab10", alpha=0.7
+            )
+            axes[0, 0].set_xlabel(
+                f"PC1 ({pca.explained_variance_ratio_[0]:.1%} variance)"
+            )
+            axes[0, 0].set_ylabel(
+                f"PC2 ({pca.explained_variance_ratio_[1]:.1%} variance)"
+            )
             axes[0, 0].set_title(f"Clusters in PCA Space (k={k})")
             plt.colorbar(scatter, ax=axes[0, 0])
 
@@ -415,10 +467,14 @@ class HabenulaClustering:
             # 3. Similarity matrix with cluster ordering
             # Reorder similarity matrix by cluster
             cluster_order = np.argsort(labels)
-            ordered_similarity = self.similarity_matrix[np.ix_(cluster_order, cluster_order)]
+            ordered_similarity = self.similarity_matrix[
+                np.ix_(cluster_order, cluster_order)
+            ]
             ordered_labels = labels[cluster_order]
 
-            im = axes[1, 0].imshow(self.similarity_matrix, cmap="RdBu_r", vmin=-0.4, vmax=0.4)
+            im = axes[1, 0].imshow(
+                ordered_similarity, cmap="RdBu_r", vmin=-0.4, vmax=0.4
+            )
             axes[1, 0].set_title(f"Similarity Matrix (Ordered by Clusters, k={k})")
             axes[1, 0].set_xlabel("Participant (Ordered)")
             axes[1, 0].set_ylabel("Participant (Ordered)")
@@ -447,15 +503,31 @@ class HabenulaClustering:
                     else:
                         between_cluster_sims.append(self.similarity_matrix[i, j])
 
-            axes[1, 1].hist(within_cluster_sims, bins=30, alpha=0.7, label="Within cluster", density=True)
-            axes[1, 1].hist(between_cluster_sims, bins=30, alpha=0.7, label="Between cluster", density=True)
+            axes[1, 1].hist(
+                within_cluster_sims,
+                bins=30,
+                alpha=0.7,
+                label="Within cluster",
+                density=True,
+            )
+            axes[1, 1].hist(
+                between_cluster_sims,
+                bins=30,
+                alpha=0.7,
+                label="Between cluster",
+                density=True,
+            )
             axes[1, 1].set_xlabel("Similarity")
             axes[1, 1].set_ylabel("Density")
             axes[1, 1].set_title(f"Similarity Distributions (k={k})")
             axes[1, 1].legend()
 
             plt.tight_layout()
-            plt.savefig(op.join(self.figures_dir, f"clusters_k_{k}_visualization.png"), dpi=300, bbox_inches="tight")
+            plt.savefig(
+                op.join(self.figures_dir, f"clusters_k_{k}_visualization.png"),
+                dpi=300,
+                bbox_inches="tight",
+            )
             plt.show()
 
         return self
@@ -479,7 +551,9 @@ class HabenulaClustering:
 
                 # Cluster sizes
                 unique, counts = np.unique(result["labels"], return_counts=True)
-                sizes_str = ", ".join([f"C{i}:{count}" for i, count in zip(unique, counts)])
+                sizes_str = ", ".join(
+                    [f"C{i}:{count}" for i, count in zip(unique, counts)]
+                )
                 print(f"        Sizes: {sizes_str}")
 
         print(f"\nFiles generated in: {self.output_dir}")
@@ -507,7 +581,9 @@ def main():
     )
 
     # Initialize clustering object with the two original init args
-    clustering = HabenulaClustering(project_dir=project_dir, base_rsfc_dir=base_rsfc_dir)
+    clustering = HabenulaClustering(
+        project_dir=project_dir, base_rsfc_dir=base_rsfc_dir
+    )
 
     # Override default output paths *without* changing class definitions
     clustering.output_dir = output_dir
@@ -515,7 +591,7 @@ def main():
     os.makedirs(clustering.output_dir, exist_ok=True)
     os.makedirs(clustering.figures_dir, exist_ok=True)
 
-    k_range = range(2, 9)
+    k_range = range(2, 21)  # range(2, 9)
 
     # Run complete analysis pipeline
     (
