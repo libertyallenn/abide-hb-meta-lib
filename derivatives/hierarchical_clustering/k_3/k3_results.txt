@@ -1,0 +1,6 @@
+Results for k=3:
+Method: hierarchical
+Silhouette score: 0.005
+Inertia: 150739712.000
+Cophenetic correlation: 0.258
+Participants per group: [303 205 197]

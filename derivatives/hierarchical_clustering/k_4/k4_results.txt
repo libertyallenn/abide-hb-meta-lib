@@ -1,0 +1,6 @@
+Results for k=4:
+Method: hierarchical
+Silhouette score: 0.005
+Inertia: 148677574.000
+Cophenetic correlation: 0.258
+Participants per group: [155 148 205 197]

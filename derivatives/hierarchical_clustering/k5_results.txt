@@ -1,0 +1,6 @@
+Results for k=5:
+Method: hierarchical
+Silhouette score: 0.003
+Inertia: 147690924.000
+Cophenetic correlation: 0.258
+Participants per group: [155 148 205  65 132]
