@@ -262,12 +262,13 @@ class HierarchicalConnectivityClustering:
             # Calculate silhouette score using precomputed distances
             sil_score = silhouette_score(Dfull, group_labels, metric="precomputed")
 
-            # Calculate within-cluster sum of squares (inertia equivalent)
-            inertia_hierarchical = self._calculate_hierarchical_inertia(group_labels, k)
+            # Calculate gap statistic
+            gap_stat, gap_std = self._calculate_gap_statistic(k, group_labels)
 
             self.cluster_metrics[k] = {
                 "silhouette": sil_score,
-                "inertia": inertia_hierarchical,
+                "gap_statistic": gap_stat,
+                "gap_std": gap_std,
                 "cophenetic_correlation": coph_corr,
             }
 
@@ -296,12 +297,22 @@ class HierarchicalConnectivityClustering:
             arrowprops=dict(arrowstyle="->", color="red"),
         )
 
-        # Inertia plot
-        inertias = [self.cluster_metrics[k]["inertia"] for k in k_values]
-        axes[1].plot(k_values, inertias, "o-", linewidth=2, markersize=6, color="green")
+        # Gap statistic plot
+        gap_stats = [self.cluster_metrics[k]["gap_statistic"] for k in k_values]
+        gap_stds = [self.cluster_metrics[k]["gap_std"] for k in k_values]
+        axes[1].errorbar(
+            k_values,
+            gap_stats,
+            yerr=gap_stds,
+            fmt="o-",
+            linewidth=2,
+            markersize=6,
+            color="green",
+            capsize=5,
+        )
         axes[1].set_xlabel("Number of Clusters (k)")
-        axes[1].set_ylabel("Within-cluster Sum of Squares")
-        axes[1].set_title("Elbow Method - Hierarchical Clustering")
+        axes[1].set_ylabel("Gap Statistic")
+        axes[1].set_title("Gap Statistic - Hierarchical Clustering")
         axes[1].grid(True, alpha=0.3)
 
         plt.tight_layout()
@@ -320,7 +331,11 @@ class HierarchicalConnectivityClustering:
             for k in sorted(self.cluster_metrics.keys()):
                 metrics_str = ", ".join(
                     [
-                        f"{metric}: {value:.3f}"
+                        (
+                            f"{metric}: {value:.3f}"
+                            if isinstance(value, float)
+                            else f"{metric}: {value}"
+                        )
                         for metric, value in self.cluster_metrics[k].items()
                         if value is not None
                     ]
@@ -328,12 +343,23 @@ class HierarchicalConnectivityClustering:
                 print(f"  k={k}: {metrics_str}", flush=True)
                 f.write(f"k={k}: {metrics_str}\n")
 
-            optimal_k = k_values[np.argmax(sil_scores)]
+            # Silhouette-based recommendation
+            optimal_k_sil = k_values[np.argmax(sil_scores)]
+
+            # Gap statistic recommendation (Tibshirani rule)
+            optimal_k_gap = self._find_optimal_k_gap(k_values)
+
             print(
-                f"\nRecommended k based on silhouette score: {optimal_k}",
+                f"\nRecommended k based on silhouette score: {optimal_k_sil}",
                 flush=True,
             )
-            f.write(f"\nRecommended k: {optimal_k}\n")
+            print(
+                f"Recommended k based on gap statistic (Tibshirani rule): {optimal_k_gap}",
+                flush=True,
+            )
+            f.write(f"\nRecommendations:\n")
+            f.write(f"  Silhouette-max: k={optimal_k_sil}\n")
+            f.write(f"  Tibshirani Gap rule: k={optimal_k_gap}\n")
 
         print(f"\nValidation scores saved to {results_path}", flush=True)
         return self
@@ -349,21 +375,91 @@ class HierarchicalConnectivityClustering:
         n[n == 0] = 1.0
         return Xc / n
 
-    def _calculate_hierarchical_inertia(self, group_labels, n_clusters):
-        """Calculate within-cluster sum of squares for hierarchical clustering"""
+    def _calculate_gap_statistic(self, k, group_labels, n_refs=50):
+        """Calculate gap statistic using uniform reference in correlation-preserving embedding"""
         try:
-            total_inertia = 0
-            for cluster_id in range(n_clusters):
-                cluster_mask = group_labels == cluster_id
-                if np.sum(cluster_mask) > 1:  # Need at least 2 points
-                    cluster_data = self.data_matrix[cluster_mask]
-                    cluster_center = np.mean(cluster_data, axis=0)
-                    cluster_inertia = np.sum((cluster_data - cluster_center) ** 2)
-                    total_inertia += cluster_inertia
-            return total_inertia
+            # Get correlation-preserving embedding
+            Xcorr = self._corr_embed()
+
+            # Calculate within-cluster dispersion for actual data
+            W_k = self._within_cluster_dispersion(Xcorr, group_labels, k)
+
+            # Generate reference datasets and calculate their dispersions
+            ref_dispersions = []
+
+            # Find bounding box of Xcorr
+            mins = np.min(Xcorr, axis=0)
+            maxs = np.max(Xcorr, axis=0)
+
+            for _ in range(n_refs):
+                # Generate uniform reference data in bounding box
+                n_samples, n_features = Xcorr.shape
+                ref_data = np.random.uniform(
+                    low=mins, high=maxs, size=(n_samples, n_features)
+                )
+
+                # Apply same clustering to reference data
+                ref_distances = pdist(ref_data, metric="euclidean")
+                ref_linkage = linkage(ref_distances, method="ward")
+                ref_labels = fcluster(ref_linkage, k, criterion="maxclust") - 1
+
+                # Calculate dispersion for reference
+                ref_W_k = self._within_cluster_dispersion(ref_data, ref_labels, k)
+                ref_dispersions.append(np.log(ref_W_k))
+
+            # Calculate gap statistic
+            log_W_k = np.log(W_k)
+            mean_log_ref_W_k = np.mean(ref_dispersions)
+            gap_stat = mean_log_ref_W_k - log_W_k
+
+            # Calculate standard error
+            std_log_ref_W_k = np.std(ref_dispersions)
+            gap_std = std_log_ref_W_k * np.sqrt(1 + 1 / n_refs)
+
+            return gap_stat, gap_std
+
         except Exception as e:
-            print(f"Could not calculate inertia for hierarchical: {e}", flush=True)
-            return None
+            print(f"Could not calculate gap statistic for k={k}: {e}", flush=True)
+            return None, None
+
+    def _within_cluster_dispersion(self, data, labels, k):
+        """Calculate within-cluster dispersion (sum of squared distances to centroids)"""
+        total_dispersion = 0
+        for cluster_id in range(k):
+            cluster_mask = labels == cluster_id
+            if np.sum(cluster_mask) > 0:
+                cluster_data = data[cluster_mask]
+                if len(cluster_data) > 1:
+                    cluster_center = np.mean(cluster_data, axis=0)
+                    cluster_dispersion = np.sum((cluster_data - cluster_center) ** 2)
+                    total_dispersion += cluster_dispersion
+        return total_dispersion
+
+    def _find_optimal_k_gap(self, k_values):
+        """Find optimal k using Tibshirani gap rule"""
+        try:
+            gap_stats = [self.cluster_metrics[k]["gap_statistic"] for k in k_values]
+            gap_stds = [self.cluster_metrics[k]["gap_std"] for k in k_values]
+
+            # Apply Tibshirani rule: choose smallest k such that Gap(k) >= Gap(k+1) - s_{k+1}
+            for i, k in enumerate(k_values[:-1]):
+                gap_k = gap_stats[i]
+                gap_k_plus_1 = gap_stats[i + 1]
+                std_k_plus_1 = gap_stds[i + 1]
+
+                if gap_k >= (gap_k_plus_1 - std_k_plus_1):
+                    return k
+
+            # If no k satisfies the rule, return the k with maximum gap
+            max_gap_idx = np.argmax(gap_stats)
+            return k_values[max_gap_idx]
+
+        except Exception as e:
+            print(f"Could not apply Tibshirani rule: {e}", flush=True)
+            # Fallback to maximum gap
+            gap_stats = [self.cluster_metrics[k]["gap_statistic"] for k in k_values]
+            max_gap_idx = np.argmax(gap_stats)
+            return k_values[max_gap_idx]
 
     def group_participants_by_hierarchical_connectivity(self, n_clusters=None):
         """Group participants based on hierarchical clustering of voxel connectivity patterns"""
@@ -415,18 +511,12 @@ class HierarchicalConnectivityClustering:
         except Exception:
             pass
 
-        # Calculate inertia
-        inertia_hierarchical = self._calculate_hierarchical_inertia(
-            group_labels, n_clusters
-        )
-
         self.voxel_connectivity_groups[n_clusters] = {
             "method": "hierarchical",
             "labels": group_labels,
             "linkage_matrix": linkage_matrix,
             "silhouette_score": silhouette,
             "cophenetic_correlation": coph_corr,
-            "inertia": inertia_hierarchical,
             "n_participants_per_group": np.bincount(group_labels),
             "distance_matrix": Dfull,
         }
@@ -437,8 +527,6 @@ class HierarchicalConnectivityClustering:
         print(f"  Method: {group_info['method']}", flush=True)
         print(f"  Number of groups: {n_clusters}", flush=True)
         print(f"  Silhouette score: {group_info['silhouette_score']:.3f}", flush=True)
-        if inertia_hierarchical is not None:
-            print(f"  Inertia: {inertia_hierarchical:.3f}", flush=True)
         print(
             f"  Participants per group: {group_info['n_participants_per_group']}",
             flush=True,
@@ -606,7 +694,6 @@ class HierarchicalConnectivityClustering:
 
         # Get results for this k
         group_info = self.voxel_connectivity_groups[k_value]
-        inertia_value = group_info.get("inertia")
 
         # Create visualizations for this k
         self.visualize_hierarchical_clustering(n_clusters=k_value)
@@ -617,8 +704,6 @@ class HierarchicalConnectivityClustering:
             f.write(f"Results for k={k_value}:\n")
             f.write(f"Method: {group_info['method']}\n")
             f.write(f"Silhouette score: {group_info['silhouette_score']:.3f}\n")
-            if inertia_value is not None:
-                f.write(f"Inertia: {inertia_value:.3f}\n")
             if group_info.get("cophenetic_correlation") is not None:
                 f.write(
                     f"Cophenetic correlation: {group_info['cophenetic_correlation']:.3f}\n"
@@ -633,8 +718,6 @@ class HierarchicalConnectivityClustering:
             f.write(f"Results for k={k_value}:\n")
             f.write(f"Method: {group_info['method']}\n")
             f.write(f"Silhouette score: {group_info['silhouette_score']:.3f}\n")
-            if inertia_value is not None:
-                f.write(f"Inertia: {inertia_value:.3f}\n")
             if group_info.get("cophenetic_correlation") is not None:
                 f.write(
                     f"Cophenetic correlation: {group_info['cophenetic_correlation']:.3f}\n"

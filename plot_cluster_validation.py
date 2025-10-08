@@ -83,22 +83,21 @@ def parse_results_file(filepath):
         if sil_match:
             metrics["silhouette"] = float(sil_match.group(1))
 
-        # Extract inertia (elbow metric)
-        inertia_match = re.search(r"Inertia:\s*([\d\.-]+)", content)
-        if inertia_match:
-            metrics["inertia"] = float(inertia_match.group(1))
+        # Extract gap statistic
+        gap_match = re.search(r"gap_statistic:\s*([\d\.-]+)", content)
+        if gap_match:
+            metrics["gap_statistic"] = float(gap_match.group(1))
 
-        # Extract group sizes for calculating inertia proxy
+        # Extract gap standard error
+        gap_std_match = re.search(r"gap_std:\s*([\d\.-]+)", content)
+        if gap_std_match:
+            metrics["gap_std"] = float(gap_std_match.group(1))
+
+        # Extract group sizes
         groups_match = re.search(r"Participants per group:\s*\[(.*?)\]", content)
         if groups_match:
             group_sizes = [int(x.strip()) for x in groups_match.group(1).split()]
             metrics["group_sizes"] = group_sizes
-            # Calculate a simple dispersion metric as inertia proxy
-            total_participants = sum(group_sizes)
-            if total_participants > 0:
-                # Normalized variance of group sizes (higher = more uneven split)
-                variance = np.var(group_sizes) / (total_participants**2)
-                metrics["group_variance"] = variance
 
     except Exception as e:
         print(f"Warning: Could not parse {filepath}: {e}")
@@ -127,10 +126,8 @@ def collect_all_results(results_dir, k_min=2, k_max=10):
             if k_min <= metrics["k"] <= k_max:
                 all_metrics.append(metrics)
                 sil_score = metrics.get("silhouette", "N/A")
-                inertia_val = metrics.get("inertia", "N/A")
-                print(
-                    f"  k={metrics['k']}: silhouette={sil_score}, inertia={inertia_val}"
-                )
+                gap_val = metrics.get("gap_statistic", "N/A")
+                print(f"  k={metrics['k']}: silhouette={sil_score}, gap={gap_val}")
 
     # Sort by k value
     all_metrics.sort(key=lambda x: x["k"])
@@ -186,22 +183,31 @@ def plot_validation_metrics(all_metrics, output_dir, figsize=(12, 5), dpi=300):
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
             )
 
-    # Plot 2: Inertia (Elbow analysis)
+    # Plot 2: Gap Statistic
     if len(axes) > 1:
-        inertia_values = [m.get("inertia", np.nan) for m in all_metrics]
-        has_inertia = not all(np.isnan(inertia_values))
+        gap_values = [m.get("gap_statistic", np.nan) for m in all_metrics]
+        gap_stds = [m.get("gap_std", np.nan) for m in all_metrics]
+        has_gap = not all(np.isnan(gap_values))
 
-        if has_inertia:
-            valid_indices = ~np.isnan(inertia_values)
+        if has_gap:
+            valid_indices = ~np.isnan(gap_values)
             valid_k = np.array(k_values)[valid_indices]
-            valid_inertia = np.array(inertia_values)[valid_indices]
+            valid_gap = np.array(gap_values)[valid_indices]
+            valid_gap_std = np.array(gap_stds)[valid_indices]
 
-            axes[1].plot(
-                valid_k, valid_inertia, "o-", linewidth=2, markersize=6, color="green"
+            axes[1].errorbar(
+                valid_k,
+                valid_gap,
+                yerr=valid_gap_std,
+                fmt="o-",
+                linewidth=2,
+                markersize=6,
+                color="green",
+                capsize=5,
             )
             axes[1].set_xlabel("Number of Clusters (k)")
-            axes[1].set_ylabel("Inertia (Within-cluster sum of squares)")
-            axes[1].set_title("Elbow Method")
+            axes[1].set_ylabel("Gap Statistic")
+            axes[1].set_title("Gap Statistic Analysis")
             axes[1].grid(True, alpha=0.3)
             axes[1].set_xticks(valid_k)
         else:
@@ -261,7 +267,7 @@ def create_summary_table(all_metrics, output_dir):
         f.write("=" * 50 + "\n\n")
 
         f.write(
-            f"{'k':<3} {'Method':<12} {'Silhouette':<12} {'Inertia':<12} {'Group Sizes':<15}\n"
+            f"{'k':<3} {'Method':<12} {'Silhouette':<12} {'Gap Stat':<12} {'Group Sizes':<15}\n"
         )
         f.write("-" * 60 + "\n")
 
@@ -269,19 +275,24 @@ def create_summary_table(all_metrics, output_dir):
             k = metrics["k"]
             method = metrics.get("method", "unknown")
             silhouette = metrics.get("silhouette", np.nan)
-            inertia = metrics.get("inertia", np.nan)
+            gap_stat = metrics.get("gap_statistic", np.nan)
             group_sizes = metrics.get("group_sizes", [])
 
             sil_str = f"{silhouette:.3f}" if not np.isnan(silhouette) else "N/A"
-            inertia_str = f"{inertia:.1f}" if not np.isnan(inertia) else "N/A"
+            gap_str = f"{gap_stat:.3f}" if not np.isnan(gap_stat) else "N/A"
             sizes_str = str(group_sizes) if group_sizes else "N/A"
 
             f.write(
-                f"{k:<3} {method:<12} {sil_str:<12} {inertia_str:<12} {sizes_str:<15}\n"
+                f"{k:<3} {method:<12} {sil_str:<12} {gap_str:<12} {sizes_str:<15}\n"
             )
 
-        # Add recommendation
+        # Add recommendations
         silhouette_scores = [m.get("silhouette", np.nan) for m in all_metrics]
+        gap_stats = [m.get("gap_statistic", np.nan) for m in all_metrics]
+
+        f.write("\nRecommendations:\n")
+
+        # Silhouette recommendation
         if not all(np.isnan(silhouette_scores)):
             valid_scores = [
                 (i, s) for i, s in enumerate(silhouette_scores) if not np.isnan(s)
@@ -289,9 +300,16 @@ def create_summary_table(all_metrics, output_dir):
             if valid_scores:
                 best_idx, best_score = max(valid_scores, key=lambda x: x[1])
                 best_k = all_metrics[best_idx]["k"]
-                f.write(
-                    f"\nRecommended k: {best_k} (silhouette score: {best_score:.3f})\n"
-                )
+                f.write(f"  Silhouette-max: k={best_k} (score: {best_score:.3f})\n")
+
+        # Gap statistic recommendation (simplified Tibshirani rule)
+        if not all(np.isnan(gap_stats)):
+            # Find k with maximum gap statistic as approximation
+            valid_gaps = [(i, g) for i, g in enumerate(gap_stats) if not np.isnan(g)]
+            if valid_gaps:
+                best_gap_idx, best_gap = max(valid_gaps, key=lambda x: x[1])
+                best_gap_k = all_metrics[best_gap_idx]["k"]
+                f.write(f"  Gap statistic max: k={best_gap_k} (gap: {best_gap:.3f})\n")
 
     print(f"Summary table saved to: {summary_file}")
     return summary_file

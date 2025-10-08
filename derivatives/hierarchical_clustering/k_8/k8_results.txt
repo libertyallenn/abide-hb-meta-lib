@@ -1,6 +1,5 @@
 Results for k=8:
 Method: hierarchical
 Silhouette score: 0.001
-Inertia: 145659183.000
 Cophenetic correlation: 0.258
 Participants per group: [155  83  65  58 147  65  39  93]
