@@ -1,5 +1,0 @@
-Results for k=9:
-Method: hierarchical
-Silhouette score: 0.001
-Cophenetic correlation: 0.258
-Participants per group: [ 53 102  83  65  58 147  65  39  93]

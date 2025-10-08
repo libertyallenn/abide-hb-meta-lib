@@ -9,7 +9,7 @@ from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import seaborn as sns
 from nilearn.maskers import NiftiMasker
-from sklearn.metrics import silhouette_score, silhouette_samples
+from sklearn.metrics import silhouette_score
 from sklearn.decomposition import PCA
 from scipy.cluster.hierarchy import dendrogram, linkage, fcluster
 from scipy.spatial.distance import pdist
@@ -164,6 +164,9 @@ class HierarchicalConnectivityClustering:
         print(f"Data matrix shape: {self.data_matrix.shape}", flush=True)
         print(f"Memory usage: ~{self.data_matrix.nbytes / 1e9:.2f} GB", flush=True)
 
+        # Create dendrogram once after data matrix is ready
+        self._create_dendrogram_once()
+
         return self
 
     def save_preprocessed_data(self):
@@ -221,6 +224,9 @@ class HierarchicalConnectivityClustering:
         print(f"Loaded data matrix: {data_file}", flush=True)
         print(f"Data shape: {self.data_matrix.shape}", flush=True)
         print(f"Participants: {len(self.df)}", flush=True)
+
+        # Create dendrogram once after data matrix is loaded
+        self._create_dendrogram_once()
 
         return self
 
@@ -374,6 +380,42 @@ class HierarchicalConnectivityClustering:
         n = np.linalg.norm(Xc, axis=1, keepdims=True)
         n[n == 0] = 1.0
         return Xc / n
+
+    def _create_dendrogram_once(self):
+        """Create dendrogram once after data matrix is ready"""
+        print("Creating hierarchical clustering dendrogram...", flush=True)
+
+        # Get correlation-preserving embedding
+        Xcorr = self._corr_embed()
+
+        # Compute hierarchical clustering
+        condensed = pdist(Xcorr, metric="euclidean")
+        linkage_matrix = linkage(condensed, method="ward")
+
+        # Create hierarchical clustering specific directory
+        hierarchical_figures_dir = op.join(self.output_dir, "figures")
+        os.makedirs(hierarchical_figures_dir, exist_ok=True)
+
+        # Create and save dendrogram
+        fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+        dendrogram(linkage_matrix, ax=ax, truncate_mode="level", p=10)
+        ax.set_title("Hierarchical Clustering Dendrogram")
+        ax.set_xlabel("Sample Index")
+        ax.set_ylabel("Distance")
+
+        plt.tight_layout()
+        plt.savefig(
+            op.join(hierarchical_figures_dir, "hierarchical_dendrogram.png"),
+            dpi=300,
+            bbox_inches="tight",
+        )
+        plt.show()
+        plt.close()
+
+        print(
+            f"Dendrogram saved to: {hierarchical_figures_dir}/hierarchical_dendrogram.png",
+            flush=True,
+        )
 
     def _calculate_gap_statistic(self, k, group_labels, n_refs=50):
         """Calculate gap statistic using uniform reference in correlation-preserving embedding"""
@@ -580,86 +622,36 @@ class HierarchicalConnectivityClustering:
         group_info = self.voxel_connectivity_groups[n_clusters]
         labels = group_info["labels"]
 
-        # Create comprehensive visualization
-        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+        # Create main visualization (PCA and group sizes)
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
         # 1. PCA visualization
         pca = PCA(n_components=2)
         data_2d = pca.fit_transform(self.data_matrix)
 
-        scatter = axes[0, 0].scatter(
+        scatter = axes[0].scatter(
             data_2d[:, 0], data_2d[:, 1], c=labels, cmap="tab10", alpha=0.7, s=50
         )
-        axes[0, 0].set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.1%} variance)")
-        axes[0, 0].set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.1%} variance)")
-        axes[0, 0].set_title(f"Hierarchical Groups in PCA Space (k={n_clusters})")
-        plt.colorbar(scatter, ax=axes[0, 0])
+        axes[0].set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.1%} variance)")
+        axes[0].set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.1%} variance)")
+        axes[0].set_title(f"Hierarchical Groups in PCA Space (k={n_clusters})")
+        plt.colorbar(scatter, ax=axes[0])
 
         # 2. Group sizes
         unique, counts = np.unique(labels, return_counts=True)
-        bars = axes[0, 1].bar(
-            unique, counts, alpha=0.7, color="skyblue", edgecolor="navy"
-        )
-        axes[0, 1].set_xlabel("Group ID")
-        axes[0, 1].set_ylabel("Number of Participants")
-        axes[0, 1].set_title(f"Hierarchical Group Sizes (k={n_clusters})")
+        bars = axes[1].bar(unique, counts, alpha=0.7, color="skyblue", edgecolor="navy")
+        axes[1].set_xlabel("Group ID")
+        axes[1].set_ylabel("Number of Participants")
+        axes[1].set_title(f"Hierarchical Group Sizes (k={n_clusters})")
         # Add count labels on bars
         for bar, count in zip(bars, counts):
-            axes[0, 1].text(
+            axes[1].text(
                 bar.get_x() + bar.get_width() / 2,
                 bar.get_height() + 0.1,
                 str(count),
                 ha="center",
                 va="bottom",
             )
-
-        # 3. Silhouette analysis
-        silhouette_vals = silhouette_samples(
-            group_info["distance_matrix"], labels, metric="precomputed"
-        )
-        avg_score = group_info["silhouette_score"]
-
-        y_lower = 10
-        for i in range(n_clusters):
-            cluster_silhouette_vals = silhouette_vals[labels == i]
-            cluster_silhouette_vals.sort()
-
-            size_cluster_i = cluster_silhouette_vals.shape[0]
-            y_upper = y_lower + size_cluster_i
-
-            color = plt.cm.tab10(i / n_clusters)
-            axes[1, 0].fill_betweenx(
-                np.arange(y_lower, y_upper),
-                0,
-                cluster_silhouette_vals,
-                facecolor=color,
-                edgecolor=color,
-                alpha=0.7,
-            )
-
-            axes[1, 0].text(-0.05, y_lower + 0.5 * size_cluster_i, str(i))
-            y_lower = y_upper + 10
-
-        axes[1, 0].set_xlabel("Silhouette Coefficient Values")
-        axes[1, 0].set_ylabel("Group Label")
-        axes[1, 0].set_title("Silhouette Analysis")
-
-        # Add vertical line for average silhouette score
-        axes[1, 0].axvline(
-            x=avg_score,
-            color="red",
-            linestyle="--",
-            label=f"Average Score: {avg_score:.3f}",
-        )
-        axes[1, 0].legend()
-
-        # 4. Dendrogram
-        dendrogram(
-            group_info["linkage_matrix"], ax=axes[1, 1], truncate_mode="level", p=10
-        )
-        axes[1, 1].set_title("Hierarchical Clustering Dendrogram")
-        axes[1, 1].set_xlabel("Sample Index")
-        axes[1, 1].set_ylabel("Distance")
 
         plt.tight_layout()
         plt.savefig(
@@ -670,6 +662,11 @@ class HierarchicalConnectivityClustering:
             bbox_inches="tight",
         )
         plt.show()
+
+        # Create separate dendrogram figure (only once, not k-specific)
+        if not hasattr(self, "_dendrogram_created"):
+            self._create_dendrogram_figure(group_info, n_clusters)
+            self._dendrogram_created = True
 
         return self
 
@@ -695,6 +692,15 @@ class HierarchicalConnectivityClustering:
         # Get results for this k
         group_info = self.voxel_connectivity_groups[k_value]
 
+        # Calculate gap statistic for this k
+        group_labels = group_info["labels"]
+        gap_stat, gap_std = self._calculate_gap_statistic(k_value, group_labels)
+
+        # Add gap statistics to the group info
+        if gap_stat is not None:
+            self.voxel_connectivity_groups[k_value]["gap_statistic"] = gap_stat
+            self.voxel_connectivity_groups[k_value]["gap_std"] = gap_std
+
         # Create visualizations for this k
         self.visualize_hierarchical_clustering(n_clusters=k_value)
 
@@ -704,6 +710,10 @@ class HierarchicalConnectivityClustering:
             f.write(f"Results for k={k_value}:\n")
             f.write(f"Method: {group_info['method']}\n")
             f.write(f"Silhouette score: {group_info['silhouette_score']:.3f}\n")
+            if group_info.get("gap_statistic") is not None:
+                f.write(f"gap_statistic: {group_info['gap_statistic']:.3f}\n")
+            if group_info.get("gap_std") is not None:
+                f.write(f"gap_std: {group_info['gap_std']:.3f}\n")
             if group_info.get("cophenetic_correlation") is not None:
                 f.write(
                     f"Cophenetic correlation: {group_info['cophenetic_correlation']:.3f}\n"
@@ -718,6 +728,10 @@ class HierarchicalConnectivityClustering:
             f.write(f"Results for k={k_value}:\n")
             f.write(f"Method: {group_info['method']}\n")
             f.write(f"Silhouette score: {group_info['silhouette_score']:.3f}\n")
+            if group_info.get("gap_statistic") is not None:
+                f.write(f"gap_statistic: {group_info['gap_statistic']:.3f}\n")
+            if group_info.get("gap_std") is not None:
+                f.write(f"gap_std: {group_info['gap_std']:.3f}\n")
             if group_info.get("cophenetic_correlation") is not None:
                 f.write(
                     f"Cophenetic correlation: {group_info['cophenetic_correlation']:.3f}\n"
@@ -768,6 +782,7 @@ class HierarchicalConnectivityClustering:
         print("  - Cluster validation plots", flush=True)
         print("  - Group assignment files", flush=True)
         print("  - Visualization plots", flush=True)
+        print("  - Dendrogram in figures/", flush=True)
 
 
 def main():
