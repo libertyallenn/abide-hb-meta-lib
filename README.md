@@ -1,13 +1,53 @@
 # abide-hb-meta
 
-Clustering autistic participants based on **whole-brain habenula functional connectivity** (rsFC).  
-This project builds participant × participant similarity matrices from rsFC maps and applies K-means clustering across a range of *k*, saving cluster assignments, centroid maps, and QC figures.
+**Hierarchical clustering of autistic participants based on whole-brain habenula functional connectivity patterns.**
+
+This project identifies subgroups of autistic participants who share similar habenula connectivity patterns across the brain. We use hierarchical clustering to discover natural groupings in the data and employ silhouette scores and gap statistics as stability metrics to determine the optimal number of clusters.
 
 ---
 
-# abide-hb-meta
+## Overview
 
-Clustering autistic participants based on whole-brain habenula functional connectivity (rsFC). The repository contains several workflows and convenience scripts to build participant-by-participant similarity matrices, run K-means clustering across a range of k, and save cluster assignments, centroid maps, and QC figures.
+We performed hierarchical clustering analysis to identify similarities between autistic participants in their habenula connectivity patterns. The approach:
+
+1. **Data preparation**: Whole-brain habenula functional connectivity (rsFC) maps from autistic participants
+2. **Hierarchical clustering**: Ward linkage clustering on correlation-distance to identify natural groupings
+3. **Cluster validation**: Silhouette analysis and gap statistics to determine optimal cluster solutions
+4. **Visualization**: Comprehensive plots and validation metrics to aid interpretation
+
+### Key Features
+
+- **Hierarchical clustering**: Discovers natural groupings without pre-specifying cluster count
+- **Multiple validation metrics**: Both silhouette scores and gap statistics for robust cluster evaluation
+- **Parallel processing**: Efficient computation across different k values (k=2 to k=8)
+- **Comprehensive outputs**: Cluster assignments, validation plots, and summary statistics
+
+---
+
+## Choosing the Best Cluster Solution
+
+We use two complementary stability metrics to determine the optimal number of clusters:
+
+### 1. Silhouette Analysis
+- **What it measures**: How well each participant fits within their assigned cluster vs. other clusters
+- **Range**: -1 to +1 (higher is better)
+- **Interpretation**: 
+  - Values > 0.5: Strong cluster structure
+  - Values 0.2-0.5: Reasonable structure
+  - Values < 0.2: Weak or artificial structure
+
+### 2. Gap Statistic
+- **What it measures**: Compares within-cluster dispersion to expected dispersion under null hypothesis
+- **Interpretation**: Higher values indicate better clustering
+- **Tibshirani rule**: Choose smallest k where Gap(k) ≥ Gap(k+1) - s_{k+1}
+
+### How to Choose:
+1. **Look for silhouette score peaks**: The k value with the highest silhouette score often indicates optimal clustering
+2. **Apply gap statistic rule**: Use Tibshirani rule for statistical rigor
+3. **Consider interpretability**: Balance statistical metrics with biological/clinical interpretability
+4. **Check cluster sizes**: Ensure clusters have reasonable sample sizes for meaningful analysis
+
+The validation plots show both metrics across k=2 to k=8, with clear annotations highlighting the optimal solutions.
 
 ---
 
@@ -15,30 +55,34 @@ Clustering autistic participants based on whole-brain habenula functional connec
 
 Top-level scripts and important files in this directory:
 
-- `kmeans-workflow.py` — Main end-to-end pipeline: loads maps, builds similarity matrices, runs K-means across a range of k, and writes cluster outputs and figures.
-- `kmeans_similarity_workflow.py` — Focused workflow that builds participant × participant similarity matrices and related QC visualizations. Use this when you only need the similarity matrix and diagnostics.
-- `clustering-workflow.py` — Alternative clustering driver (a smaller/experimental workflow that can be used to apply clustering using precomputed similarity/distance matrices).
+- `hierarchical-workflow.py` — Main hierarchical clustering pipeline: loads connectivity maps, performs Ward hierarchical clustering, calculates validation metrics, and generates comprehensive outputs.
+- `plot_cluster_validation.py` — Creates validation plots showing silhouette scores and gap statistics across k values to help determine optimal cluster solutions.
 - `utils.py` — Helper functions used by the workflows (masking, thresholding, I/O helpers).
-- `kmeans_env.yml` — Conda environment specification used to reproduce the Python environment used during development.
-- `run_kmeans.sh` — Shell wrapper / HPC launcher for the `kmeans-workflow.py` (may be used with `sbatch` on SLURM clusters or run locally).
-- `run_kmeans_similarity.sh` — Wrapper script to run `kmeans_similarity_workflow.py` (HPC/launcher convenience script).
-- `run_clustering.sh` — Wrapper script to run `clustering-workflow.py`.
-- `derivatives/` — Output directory (contains example output files in this repo).
+- `kmeans_env.yml` — Conda environment specification for reproducing the analysis environment.
+- `run_hierarchical.sh` — Shell wrapper for running `hierarchical-workflow.py` on HPC clusters or locally.
+- `run_plot-validation.sh` — Script to generate cluster validation plots.
+- `derivatives/` — Output directory containing results:
+  - `hierarchical_clustering/` — Main results directory
+    - `k_2/` to `k_8/` — Individual cluster solutions
+    - `figures/` — Validation plots and dendrograms
+    - `cluster_validation_metrics.csv` — Combined validation metrics DataFrame
 
-There are example derivative files in `derivatives/` included for reference (e.g., `sub-group_task-rest_desc-1S2StTesthabenula_conntable*.txt`).
+### Legacy Files
+- `kmeans-workflow.py` — Original K-means clustering approach (deprecated in favor of hierarchical clustering)
+- `clustering-workflow.py` — Alternative clustering driver (experimental)
 
 ---
 
-## Quick overview of the pipeline steps
+## Pipeline Steps
 
-Typical processing steps implemented across the workflows:
+The hierarchical clustering pipeline follows these steps:
 
-1. Load metadata (TSV/TXT) and construct paths to participant rsFC maps.
-2. Mask & vectorize maps into a participant × voxel data matrix.
-3. Compute similarity across participants (Pearson correlation by default).
-4. Optionally reduce dimensionality (PCA) and evaluate cluster validity (silhouette, elbow) to help select k.
-5. Perform clustering (K-means) across a user-specified range of k.
-6. Generate outputs: centroid beta maps, z-maps, thresholded maps, cluster assignment lists, and QC figures (similarity heatmaps, validation plots, PCA scatter plots, etc.).
+1. **Data loading**: Load metadata and validate habenula rsFC map paths
+2. **Data matrix creation**: Mask and vectorize connectivity maps into participant × voxel matrix
+3. **Hierarchical clustering**: Apply Ward linkage clustering across k=2 to k=8
+4. **Validation metrics**: Calculate silhouette scores and gap statistics for each k
+5. **Output generation**: Create cluster assignments, validation plots, and summary statistics
+6. **Visualization**: Generate dendrograms, PCA plots, and validation summaries
 
 ---
 
@@ -56,13 +100,26 @@ Note: some workflows default to filtering rows by `group == "asd"`. You can modi
 
 ## Outputs
 
-Workflows write outputs under `derivatives/` (for example `derivatives/k_clustering_matrix/`), including:
+The hierarchical clustering workflow generates comprehensive outputs under `derivatives/hierarchical_clustering/`:
 
-- `figures/` — diagnostic plots (similarity heatmaps, cluster validation plots, cluster visualizations)
-- `k_{k}_clusters/` — per-k folders containing cluster centroid maps and participant lists
-- `cluster_assignments_k_{k}.csv` — table of cluster assignments for each subject at a given k
+### Main Results
+- `cluster_validation_metrics.csv` — Combined DataFrame with silhouette scores, gap statistics, and validation metrics for all k values
+- `hierarchical_cluster_validation.txt` — Summary of validation results and recommendations
 
-Exact filenames and folder layout vary slightly between workflows, but all workflows include cluster assignments, centroid maps, and QC figures.
+### Per-k Results (k_2/ through k_8/)
+- `hierarchical_connectivity_groups_k{k}.csv` — Cluster assignments for each participant
+- `k{k}_results.txt` — Detailed validation metrics for this k value
+- `figures/` — Visualization plots for this cluster solution
+
+### Validation Plots
+- `figures/cluster_validation_summary.png` — Combined silhouette and gap statistic plots
+- `figures/hierarchical_dendrogram.png` — Hierarchical clustering dendrogram
+- `figures/hierarchical_connectivity_groups_k{k}.png` — PCA visualization and cluster size plots
+
+### Key Output Files
+- **Cluster assignments**: CSV files showing which cluster each participant belongs to
+- **Validation metrics**: Quantitative measures to determine optimal k
+- **Visualization plots**: Clear graphics showing cluster structure and validation results
 
 ---
 
@@ -79,49 +136,92 @@ If you prefer pip, ensure you have the usual packages: `pandas`, `numpy`, `scipy
 
 ---
 
-## Usage examples
+## Usage Examples
 
-Run the main K-means workflow locally (edit configuration at the top / `main()` of the script):
+### Full Hierarchical Clustering Analysis
 
-```bash
-python kmeans-workflow.py
-```
-
-Build only the similarity matrix and QC outputs:
+Run the complete hierarchical clustering workflow:
 
 ```bash
-python kmeans_similarity_workflow.py
+# Full analysis (k=2 to k=8)
+python hierarchical-workflow.py \
+    --project_dir /path/to/project \
+    --data_dir /path/to/rsfc/data \
+    --out_dir derivatives/hierarchical_clustering \
+    --k_min 2 --k_max 8
 ```
 
-Run the alternative clustering driver:
+### Parallel Processing (Recommended for HPC)
 
 ```bash
-python clustering-workflow.py
+# Step 1: Preprocess data matrix (run once)
+python hierarchical-workflow.py \
+    --project_dir /path/to/project \
+    --data_dir /path/to/rsfc/data \
+    --out_dir derivatives/hierarchical_clustering \
+    --preprocess_only
+
+# Step 2: Submit parallel jobs for each k value
+for k in {2..8}; do
+    sbatch --export=K_VALUE=$k run_hierarchical.sh
+done
 ```
 
-Wrapper scripts (convenience/HPC):
+### Generate Validation Plots
+
+Create validation plots from results:
 
 ```bash
-# run locally or on a compute node
-bash run_kmeans.sh
-bash run_kmeans_similarity.sh
-bash run_clustering.sh
-
-# or submit to SLURM if the script is configured for sbatch
-sbatch run_kmeans.sh
-sbatch run_kmeans_similarity.sh
-sbatch run_clustering.sh
+# Generate cluster validation plots
+python plot_cluster_validation.py \
+    --results_dir derivatives/hierarchical_clustering \
+    --k_min 2 --k_max 8
 ```
 
-If you update scripts or need a different metadata path, edit the `main()` section in the relevant Python file(s) to point to your `project_dir`, `metadata_file`, and `base_rsfc_dir`.
+### Wrapper Scripts (HPC/Local)
+
+```bash
+# Run complete workflow locally
+bash run_hierarchical.sh
+
+# Generate validation plots
+bash run_plot-validation.sh
+
+# Submit to SLURM cluster
+sbatch run_hierarchical.sh
+```
+
+### Using the Results
+
+After running the analysis:
+
+1. **Check validation plots**: Look at `figures/cluster_validation_summary.png` to see silhouette and gap statistics
+2. **Review recommendations**: Check `hierarchical_cluster_validation.txt` for suggested k values
+3. **Examine cluster assignments**: Use `hierarchical_connectivity_groups_k{k}.csv` files for downstream analysis
+4. **Inspect individual solutions**: Review per-k results in `k_{k}/` directories
 
 ---
 
 ## Troubleshooting
 
-- If imports fail, ensure you activated the conda environment created from `kmeans_env.yml`.
-- Check that the metadata `InputFile` paths point to existing NIfTI files (or update `base_rsfc_dir` in the scripts).
-- Inspect stdout/logs produced by the `run_*.sh` scripts for runtime errors (they may include SLURM directives).
+- **Import errors**: Ensure you activated the conda environment created from `kmeans_env.yml`
+- **Missing rsFC files**: Check that metadata `InputFile` paths point to existing NIfTI files or update `base_rsfc_dir`
+- **Parallel job issues**: Verify SLURM directives in wrapper scripts match your cluster configuration
+- **Memory issues**: Large datasets may require more memory; adjust job parameters or use preprocessing mode
+- **Plotting errors**: Ensure the results directory contains either `cluster_validation_metrics.csv` or individual `k*_results.txt` files
+- **Empty clusters**: If clusters are too small, consider using a smaller k range or different clustering parameters
+
+### Common Issues
+
+- **Script hangs on visualization**: The plotting functions now use `plt.close()` instead of `plt.show()` for headless environments
+- **File not found errors**: Check that the hierarchical clustering results exist before running validation plots
+- **Inconsistent results**: Ensure all parallel jobs complete before generating summary plots
+
+---
+
+## Citation
+
+If you use this clustering approach, please cite the relevant methodological papers for hierarchical clustering, silhouette analysis, and gap statistics.
 
 ---
 

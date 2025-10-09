@@ -111,36 +111,11 @@ if [[ ${SLURM_ARRAY_TASK_ID} == ${SLURM_ARRAY_TASK_MAX} ]]; then
         echo "WARNING: No valid results found!"
     fi
     
-    # Create consolidated CSV
-    CSV_FILE="${OUTPUT_DIR}/all_hierarchical_results.csv"
-    echo "k,method,silhouette_score,inertia,cophenetic_correlation,group_sizes" > "${CSV_FILE}"
-    
-    for k in $(seq ${K_MIN} ${K_MAX}); do
-        RESULT_FILE="${OUTPUT_DIR}/k${k}_results.txt"
-        if [[ -f "${RESULT_FILE}" ]]; then
-            METHOD_VAL=$(grep "Method:" "${RESULT_FILE}" | awk '{print $2}')
-            SILHOUETTE=$(grep "Silhouette score:" "${RESULT_FILE}" | awk '{print $3}')
-            INERTIA=$(grep "Inertia:" "${RESULT_FILE}" | awk '{print $2}')
-            COPH_CORR=$(grep "Cophenetic correlation:" "${RESULT_FILE}" | awk '{print $3}')
-            GROUP_SIZES=$(grep "Participants per group:" "${RESULT_FILE}" | cut -d: -f2 | tr -d ' ')
-            
-            # Handle missing values
-            if [[ -z "${INERTIA}" ]]; then
-                INERTIA="N/A"
-            fi
-            if [[ -z "${COPH_CORR}" ]]; then
-                COPH_CORR="N/A"
-            fi
-            
-            echo "${k},${METHOD_VAL},${SILHOUETTE},${INERTIA},${COPH_CORR},\"${GROUP_SIZES}\"" >> "${CSV_FILE}"
-        fi
-    done
     
     echo "==================================================="
     echo "ALL HIERARCHICAL JOBS COMPLETED"
     echo "==================================================="
     echo "Summary file: ${SUMMARY_FILE}"
-    echo "Consolidated CSV: ${CSV_FILE}"
     echo "==================================================="
 fi
 

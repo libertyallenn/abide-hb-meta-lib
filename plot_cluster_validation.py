@@ -16,6 +16,7 @@ import os.path as op
 import re
 import glob
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 
 
@@ -29,7 +30,7 @@ def get_parser():
     )
     p.add_argument(
         "--output_dir",
-        help="Directory to save plots (default: results_dir/validation_plots)",
+        help="Directory to save plots",
     )
     p.add_argument(
         "--k_min",
@@ -106,15 +107,50 @@ def parse_results_file(filepath):
 
 
 def collect_all_results(results_dir, k_min=2, k_max=10):
-    """Collect results from all k*_results.txt files"""
+    """Collect results from all k*_results.txt files or DataFrame CSV"""
     print(f"Collecting results from: {results_dir}")
 
+    # First try to load from validation DataFrame CSV
+    csv_file = op.join(results_dir, "cluster_validation_metrics.csv")
+    if op.exists(csv_file):
+        print(f"Found validation DataFrame: {csv_file}")
+        try:
+            df = pd.read_csv(csv_file)
+            # Filter by k range
+            df = df[(df["k"] >= k_min) & (df["k"] <= k_max)]
+
+            # Convert to the expected format
+            all_metrics = []
+            for _, row in df.iterrows():
+                metrics = {
+                    "k": int(row["k"]),
+                    "method": "hierarchical",
+                    "silhouette": row.get("silhouette_score", np.nan),
+                    "gap_statistic": row.get("gap_statistic", np.nan),
+                    "gap_std": row.get("gap_std", np.nan),
+                }
+                all_metrics.append(metrics)
+
+                sil_score = metrics.get("silhouette", "N/A")
+                gap_val = metrics.get("gap_statistic", "N/A")
+                print(f"  k={metrics['k']}: silhouette={sil_score}, gap={gap_val}")
+
+            print(f"Loaded {len(all_metrics)} results from DataFrame")
+            return sorted(all_metrics, key=lambda x: x["k"])
+
+        except Exception as e:
+            print(f"Error reading DataFrame CSV: {e}")
+            print("Falling back to individual k*_results.txt files...")
+
+    # Fallback to original method with individual files
     # Find all k*_results.txt files
     pattern = op.join(results_dir, "k*_results.txt")
     result_files = glob.glob(pattern)
 
     if not result_files:
-        raise FileNotFoundError(f"No k*_results.txt files found in {results_dir}")
+        raise FileNotFoundError(
+            f"No k*_results.txt files or validation CSV found in {results_dir}"
+        )
 
     print(f"Found {len(result_files)} result files")
 
@@ -175,12 +211,18 @@ def plot_validation_metrics(all_metrics, output_dir, figsize=(12, 5), dpi=300):
             best_k = valid_k[best_idx]
             best_score = valid_sil[best_idx]
             axes[0].axvline(best_k, color="red", linestyle="--", alpha=0.7)
+
+            # Position annotation based on plot area
+            y_range = axes[0].get_ylim()
+            y_offset = (y_range[1] - y_range[0]) * 0.05  # 5% of y-range
+
             axes[0].annotate(
                 f"Best k={best_k}\nScore={best_score:.3f}",
                 xy=(best_k, best_score),
-                xytext=(best_k + 0.3, best_score + 0.01),
+                xytext=(best_k + 0.5, best_score + y_offset),
                 arrowprops=dict(arrowstyle="->", color="red"),
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
+                fontsize=10,
             )
 
     # Plot 2: Gap Statistic
@@ -246,73 +288,9 @@ def plot_validation_metrics(all_metrics, output_dir, figsize=(12, 5), dpi=300):
     plt.savefig(output_file, dpi=dpi, bbox_inches="tight")
     print(f"Validation plot saved to: {output_file}")
 
-    # Also save as PDF
-    pdf_file = op.join(output_dir, "cluster_validation_summary.pdf")
-    plt.savefig(pdf_file, bbox_inches="tight")
-    print(f"PDF version saved to: {pdf_file}")
-
     plt.show()
 
     return output_file
-
-
-def create_summary_table(all_metrics, output_dir):
-    """Create a summary table of all results"""
-    print("Creating summary table...")
-
-    summary_file = op.join(output_dir, "cluster_validation_summary.txt")
-
-    with open(summary_file, "w") as f:
-        f.write("Cluster Validation Summary\n")
-        f.write("=" * 50 + "\n\n")
-
-        f.write(
-            f"{'k':<3} {'Method':<12} {'Silhouette':<12} {'Gap Stat':<12} {'Group Sizes':<15}\n"
-        )
-        f.write("-" * 60 + "\n")
-
-        for metrics in all_metrics:
-            k = metrics["k"]
-            method = metrics.get("method", "unknown")
-            silhouette = metrics.get("silhouette", np.nan)
-            gap_stat = metrics.get("gap_statistic", np.nan)
-            group_sizes = metrics.get("group_sizes", [])
-
-            sil_str = f"{silhouette:.3f}" if not np.isnan(silhouette) else "N/A"
-            gap_str = f"{gap_stat:.3f}" if not np.isnan(gap_stat) else "N/A"
-            sizes_str = str(group_sizes) if group_sizes else "N/A"
-
-            f.write(
-                f"{k:<3} {method:<12} {sil_str:<12} {gap_str:<12} {sizes_str:<15}\n"
-            )
-
-        # Add recommendations
-        silhouette_scores = [m.get("silhouette", np.nan) for m in all_metrics]
-        gap_stats = [m.get("gap_statistic", np.nan) for m in all_metrics]
-
-        f.write("\nRecommendations:\n")
-
-        # Silhouette recommendation
-        if not all(np.isnan(silhouette_scores)):
-            valid_scores = [
-                (i, s) for i, s in enumerate(silhouette_scores) if not np.isnan(s)
-            ]
-            if valid_scores:
-                best_idx, best_score = max(valid_scores, key=lambda x: x[1])
-                best_k = all_metrics[best_idx]["k"]
-                f.write(f"  Silhouette-max: k={best_k} (score: {best_score:.3f})\n")
-
-        # Gap statistic recommendation (simplified Tibshirani rule)
-        if not all(np.isnan(gap_stats)):
-            # Find k with maximum gap statistic as approximation
-            valid_gaps = [(i, g) for i, g in enumerate(gap_stats) if not np.isnan(g)]
-            if valid_gaps:
-                best_gap_idx, best_gap = max(valid_gaps, key=lambda x: x[1])
-                best_gap_k = all_metrics[best_gap_idx]["k"]
-                f.write(f"  Gap statistic max: k={best_gap_k} (gap: {best_gap:.3f})\n")
-
-    print(f"Summary table saved to: {summary_file}")
-    return summary_file
 
 
 def main():
@@ -321,7 +299,8 @@ def main():
 
     # Set default output directory
     if args.output_dir is None:
-        args.output_dir = op.join(args.results_dir, "validation_plots")
+        default_dir = op.join("derivatives", "hierarchical_clustering", "figures")
+        args.output_dir = default_dir
 
     print("Cluster Validation Plotting Tool")
     print("=" * 40)
@@ -338,12 +317,9 @@ def main():
             return 1
 
         # Create plots
-        plot_file = plot_validation_metrics(
+        plot_validation_metrics(
             all_metrics, args.output_dir, figsize=args.figsize, dpi=args.dpi
         )
-
-        # Create summary table
-        summary_file = create_summary_table(all_metrics, args.output_dir)
 
         print("\nSUCCESS!")
         print(f"Processed {len(all_metrics)} cluster solutions")

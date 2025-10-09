@@ -1,66 +1,18 @@
 Hierarchical Connectivity Clustering - Parallel Results Summary
-Generated on: Wed Oct  8 16:40:47 EDT 2025
+Generated on: Thu Oct  9 13:04:00 EDT 2025
 K range tested: 2 to 9
 Method: hierarchical
 ========================================
 
-Results for k=2:
-Results for k=2:
-Method: hierarchical
-Silhouette score: 0.007
-Cophenetic correlation: 0.258
-Participants per group: [303 402]
-
-Results for k=3:
-Results for k=3:
-Method: hierarchical
-Silhouette score: 0.005
-Cophenetic correlation: 0.258
-Participants per group: [303 205 197]
-
-Results for k=4:
-Results for k=4:
-Method: hierarchical
-Silhouette score: 0.005
-Cophenetic correlation: 0.258
-Participants per group: [155 148 205 197]
-
-Results for k=5:
-Results for k=5:
-Method: hierarchical
-Silhouette score: 0.003
-Cophenetic correlation: 0.258
-Participants per group: [155 148 205  65 132]
-
-Results for k=6:
-Results for k=6:
-Method: hierarchical
-Silhouette score: 0.003
-Cophenetic correlation: 0.258
-Participants per group: [155 148  58 147  65 132]
-
-Results for k=7:
-Results for k=7:
-Method: hierarchical
-Silhouette score: 0.001
-Cophenetic correlation: 0.258
-Participants per group: [155  83  65  58 147  65 132]
-
-Results for k=8:
-Results for k=8:
-Method: hierarchical
-Silhouette score: 0.001
-Cophenetic correlation: 0.258
-Participants per group: [155  83  65  58 147  65  39  93]
-
-Results for k=9:
-Results for k=9:
-Method: hierarchical
-Silhouette score: 0.001
-Cophenetic correlation: 0.258
-Participants per group: [ 53 102  83  65  58 147  65  39  93]
-
+WARNING: Results not found for k=2
+WARNING: Results not found for k=3
+WARNING: Results not found for k=4
+WARNING: Results not found for k=5
+WARNING: Results not found for k=6
+WARNING: Results not found for k=7
+WARNING: Results not found for k=8
+WARNING: Results not found for k=9
 
 ========================================
 RECOMMENDATION:
-Best k based on silhouette score: k=2 (score: 0.007)
+No valid results found!

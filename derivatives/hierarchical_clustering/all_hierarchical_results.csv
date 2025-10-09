@@ -1,9 +1,0 @@
-k,method,silhouette_score,inertia,cophenetic_correlation,group_sizes
-2,hierarchical,0.007,N/A,0.258,"[303402]"
-3,hierarchical,0.005,N/A,0.258,"[303205197]"
-4,hierarchical,0.005,N/A,0.258,"[155148205197]"
-5,hierarchical,0.003,N/A,0.258,"[15514820565132]"
-6,hierarchical,0.003,N/A,0.258,"[1551485814765132]"
-7,hierarchical,0.001,N/A,0.258,"[15583655814765132]"
-8,hierarchical,0.001,N/A,0.258,"[155836558147653993]"
-9,hierarchical,0.001,N/A,0.258,"[53102836558147653993]"
