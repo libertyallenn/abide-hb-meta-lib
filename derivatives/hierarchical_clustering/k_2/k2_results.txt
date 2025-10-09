@@ -1,6 +1,7 @@
 Results for k=2:
 Method: hierarchical
 Silhouette score: 0.007
-Inertia: 151712496.000
+gap_statistic: 2.176
+gap_std: 0.000
 Cophenetic correlation: 0.258
 Participants per group: [303 402]

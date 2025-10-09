@@ -1,6 +1,0 @@
-Results for k=6:
-Method: hierarchical
-Silhouette score: 0.003
-Inertia: 146868402.000
-Cophenetic correlation: 0.258
-Participants per group: [155 148  58 147  65 132]

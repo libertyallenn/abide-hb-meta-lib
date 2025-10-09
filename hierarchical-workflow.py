@@ -9,7 +9,7 @@ from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import seaborn as sns
 from nilearn.maskers import NiftiMasker
-from sklearn.metrics import silhouette_score, silhouette_samples
+from sklearn.metrics import silhouette_score
 from sklearn.decomposition import PCA
 from scipy.cluster.hierarchy import dendrogram, linkage, fcluster
 from scipy.spatial.distance import pdist
@@ -164,6 +164,9 @@ class HierarchicalConnectivityClustering:
         print(f"Data matrix shape: {self.data_matrix.shape}", flush=True)
         print(f"Memory usage: ~{self.data_matrix.nbytes / 1e9:.2f} GB", flush=True)
 
+        # Create dendrogram once after data matrix is ready
+        self._create_dendrogram_once()
+
         return self
 
     def save_preprocessed_data(self):
@@ -222,6 +225,9 @@ class HierarchicalConnectivityClustering:
         print(f"Data shape: {self.data_matrix.shape}", flush=True)
         print(f"Participants: {len(self.df)}", flush=True)
 
+        # Create dendrogram once after data matrix is loaded
+        # self._create_dendrogram_once()
+
         return self
 
     def determine_optimal_clusters(self, k_range):
@@ -262,12 +268,13 @@ class HierarchicalConnectivityClustering:
             # Calculate silhouette score using precomputed distances
             sil_score = silhouette_score(Dfull, group_labels, metric="precomputed")
 
-            # Calculate within-cluster sum of squares (inertia equivalent)
-            inertia_hierarchical = self._calculate_hierarchical_inertia(group_labels, k)
+            # Calculate gap statistic
+            gap_stat, gap_std = self._calculate_gap_statistic(k, group_labels)
 
             self.cluster_metrics[k] = {
                 "silhouette": sil_score,
-                "inertia": inertia_hierarchical,
+                "gap_statistic": gap_stat,
+                "gap_std": gap_std,
                 "cophenetic_correlation": coph_corr,
             }
 
@@ -296,12 +303,22 @@ class HierarchicalConnectivityClustering:
             arrowprops=dict(arrowstyle="->", color="red"),
         )
 
-        # Inertia plot
-        inertias = [self.cluster_metrics[k]["inertia"] for k in k_values]
-        axes[1].plot(k_values, inertias, "o-", linewidth=2, markersize=6, color="green")
+        # Gap statistic plot
+        gap_stats = [self.cluster_metrics[k]["gap_statistic"] for k in k_values]
+        gap_stds = [self.cluster_metrics[k]["gap_std"] for k in k_values]
+        axes[1].errorbar(
+            k_values,
+            gap_stats,
+            yerr=gap_stds,
+            fmt="o-",
+            linewidth=2,
+            markersize=6,
+            color="green",
+            capsize=5,
+        )
         axes[1].set_xlabel("Number of Clusters (k)")
-        axes[1].set_ylabel("Within-cluster Sum of Squares")
-        axes[1].set_title("Elbow Method - Hierarchical Clustering")
+        axes[1].set_ylabel("Gap Statistic")
+        axes[1].set_title("Gap Statistic - Hierarchical Clustering")
         axes[1].grid(True, alpha=0.3)
 
         plt.tight_layout()
@@ -320,7 +337,11 @@ class HierarchicalConnectivityClustering:
             for k in sorted(self.cluster_metrics.keys()):
                 metrics_str = ", ".join(
                     [
-                        f"{metric}: {value:.3f}"
+                        (
+                            f"{metric}: {value:.3f}"
+                            if isinstance(value, float)
+                            else f"{metric}: {value}"
+                        )
                         for metric, value in self.cluster_metrics[k].items()
                         if value is not None
                     ]
@@ -328,15 +349,155 @@ class HierarchicalConnectivityClustering:
                 print(f"  k={k}: {metrics_str}", flush=True)
                 f.write(f"k={k}: {metrics_str}\n")
 
-            optimal_k = k_values[np.argmax(sil_scores)]
+            # Silhouette-based recommendation
+            optimal_k_sil = k_values[np.argmax(sil_scores)]
+
+            # Gap statistic recommendation (Tibshirani rule)
+            optimal_k_gap = self._find_optimal_k_gap(k_values)
+
             print(
-                f"\nRecommended k based on silhouette score: {optimal_k}",
+                f"\nRecommended k based on silhouette score: {optimal_k_sil}",
                 flush=True,
             )
-            f.write(f"\nRecommended k: {optimal_k}\n")
+            print(
+                f"Recommended k based on gap statistic (Tibshirani rule): {optimal_k_gap}",
+                flush=True,
+            )
+            f.write(f"\nRecommendations:\n")
+            f.write(f"  Silhouette-max: k={optimal_k_sil}\n")
+            f.write(f"  Tibshirani Gap rule: k={optimal_k_gap}\n")
 
         print(f"\nValidation scores saved to {results_path}", flush=True)
+
+        # Create and save validation DataFrame
+        self._create_validation_dataframe()
+
         return self
+
+    def _create_validation_dataframe(self):
+        """Create DataFrame with k values, silhouette scores, and gap statistics"""
+        print("Creating validation metrics DataFrame...", flush=True)
+
+        # Prepare data for DataFrame
+        validation_data = []
+        for k in sorted(self.cluster_metrics.keys()):
+            metrics = self.cluster_metrics[k]
+            validation_data.append(
+                {
+                    "k": k,
+                    "silhouette_score": metrics.get("silhouette", None),
+                    "gap_statistic": metrics.get("gap_statistic", None),
+                    "gap_std": metrics.get("gap_std", None),
+                }
+            )
+
+        # Create DataFrame
+        self.validation_df = pd.DataFrame(validation_data)
+
+        # Save DataFrame with thread-safe approach
+        self._save_validation_dataframe(self.validation_df)
+
+        return self.validation_df
+
+    def _save_validation_dataframe(self, df):
+        """Save validation DataFrame to CSV with thread-safe file locking"""
+        import fcntl
+        import time
+
+        csv_file = op.join(self.output_dir, "cluster_validation_metrics.csv")
+        lock_file = csv_file + ".lock"
+
+        max_attempts = 10
+        for attempt in range(max_attempts):
+            try:
+                # Create lock file and acquire exclusive lock
+                with open(lock_file, "w") as lock:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+                    # Save the DataFrame
+                    df.to_csv(csv_file, index=False)
+                    print(f"Validation DataFrame saved to: {csv_file}", flush=True)
+                    print(f"DataFrame shape: {df.shape}", flush=True)
+                    break
+
+            except (IOError, OSError) as e:
+                if attempt < max_attempts - 1:
+                    time.sleep(0.1 * (attempt + 1))  # Exponential backoff
+                    continue
+                else:
+                    print(
+                        f"Failed to save DataFrame after {max_attempts} attempts: {e}",
+                        flush=True,
+                    )
+
+        # Clean up lock file
+        try:
+            if op.exists(lock_file):
+                os.remove(lock_file)
+        except:
+            pass
+
+    def _append_to_validation_dataframe(
+        self, k_value, silhouette_score, gap_stat, gap_std
+    ):
+        """Thread-safe method to append single k results to validation DataFrame"""
+        import fcntl
+        import time
+
+        csv_file = op.join(self.output_dir, "cluster_validation_metrics.csv")
+        lock_file = csv_file + ".lock"
+
+        # New row to add
+        new_row = {
+            "k": k_value,
+            "silhouette_score": silhouette_score,
+            "gap_statistic": gap_stat,
+            "gap_std": gap_std,
+        }
+
+        max_attempts = 10
+        for attempt in range(max_attempts):
+            try:
+                # Create lock file and acquire exclusive lock
+                with open(lock_file, "w") as lock:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+                    # Load existing DataFrame or create new one
+                    if op.exists(csv_file):
+                        existing_df = pd.read_csv(csv_file)
+                        # Remove any existing row for this k value
+                        existing_df = existing_df[existing_df["k"] != k_value]
+                        # Add new row
+                        updated_df = pd.concat(
+                            [existing_df, pd.DataFrame([new_row])], ignore_index=True
+                        )
+                    else:
+                        updated_df = pd.DataFrame([new_row])
+
+                    # Sort by k value and save
+                    updated_df = updated_df.sort_values("k").reset_index(drop=True)
+                    updated_df.to_csv(csv_file, index=False)
+
+                    print(f"Updated validation DataFrame with k={k_value}", flush=True)
+                    print(f"Current DataFrame shape: {updated_df.shape}", flush=True)
+                    break
+
+            except (IOError, OSError) as e:
+                if attempt < max_attempts - 1:
+                    time.sleep(0.1 * (attempt + 1))  # Exponential backoff
+                    continue
+                else:
+                    print(
+                        f"Failed to update DataFrame after {max_attempts} attempts: {e}",
+                        flush=True,
+                    )
+
+        # Clean up lock file
+        try:
+            if op.exists(lock_file):
+                os.remove(lock_file)
+        except:
+            pass
 
     def _corr_embed(self):
         """
@@ -349,21 +510,126 @@ class HierarchicalConnectivityClustering:
         n[n == 0] = 1.0
         return Xc / n
 
-    def _calculate_hierarchical_inertia(self, group_labels, n_clusters):
-        """Calculate within-cluster sum of squares for hierarchical clustering"""
+    def _create_dendrogram_once(self):
+        """Create dendrogram once after data matrix is ready"""
+        print("Creating hierarchical clustering dendrogram...", flush=True)
+
+        # Get correlation-preserving embedding
+        Xcorr = self._corr_embed()
+
+        # Compute hierarchical clustering
+        condensed = pdist(Xcorr, metric="euclidean")
+        linkage_matrix = linkage(condensed, method="ward")
+
+        # Create hierarchical clustering specific directory
+        hierarchical_figures_dir = op.join(self.output_dir, "figures")
+        os.makedirs(hierarchical_figures_dir, exist_ok=True)
+
+        # Create and save dendrogram
+        fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+        dendrogram(linkage_matrix, ax=ax, truncate_mode="level", p=10)
+        ax.set_title("Hierarchical Clustering Dendrogram")
+        ax.set_xlabel("Sample Index")
+        ax.set_ylabel("Distance")
+
+        plt.tight_layout()
+        plt.savefig(
+            op.join(hierarchical_figures_dir, "hierarchical_dendrogram.png"),
+            dpi=300,
+            bbox_inches="tight",
+        )
+        plt.close()
+
+        print(
+            f"Dendrogram saved to: {hierarchical_figures_dir}/hierarchical_dendrogram.png",
+            flush=True,
+        )
+
+    def _calculate_gap_statistic(self, k, group_labels, n_refs=50):
+        """Calculate gap statistic using uniform reference in correlation-preserving embedding"""
         try:
-            total_inertia = 0
-            for cluster_id in range(n_clusters):
-                cluster_mask = group_labels == cluster_id
-                if np.sum(cluster_mask) > 1:  # Need at least 2 points
-                    cluster_data = self.data_matrix[cluster_mask]
-                    cluster_center = np.mean(cluster_data, axis=0)
-                    cluster_inertia = np.sum((cluster_data - cluster_center) ** 2)
-                    total_inertia += cluster_inertia
-            return total_inertia
+            # Get correlation-preserving embedding
+            Xcorr = self._corr_embed()
+
+            # Calculate within-cluster dispersion for actual data
+            W_k = self._within_cluster_dispersion(Xcorr, group_labels, k)
+
+            # Generate reference datasets and calculate their dispersions
+            ref_dispersions = []
+
+            # Find bounding box of Xcorr
+            mins = np.min(Xcorr, axis=0)
+            maxs = np.max(Xcorr, axis=0)
+
+            for _ in range(n_refs):
+                # Generate uniform reference data in bounding box
+                n_samples, n_features = Xcorr.shape
+                ref_data = np.random.uniform(
+                    low=mins, high=maxs, size=(n_samples, n_features)
+                )
+
+                # Apply same clustering to reference data
+                ref_distances = pdist(ref_data, metric="euclidean")
+                ref_linkage = linkage(ref_distances, method="ward")
+                ref_labels = fcluster(ref_linkage, k, criterion="maxclust") - 1
+
+                # Calculate dispersion for reference
+                ref_W_k = self._within_cluster_dispersion(ref_data, ref_labels, k)
+                ref_dispersions.append(np.log(ref_W_k))
+
+            # Calculate gap statistic
+            log_W_k = np.log(W_k)
+            mean_log_ref_W_k = np.mean(ref_dispersions)
+            gap_stat = mean_log_ref_W_k - log_W_k
+
+            # Calculate standard error
+            std_log_ref_W_k = np.std(ref_dispersions)
+            gap_std = std_log_ref_W_k * np.sqrt(1 + 1 / n_refs)
+
+            return gap_stat, gap_std
+
         except Exception as e:
-            print(f"Could not calculate inertia for hierarchical: {e}", flush=True)
-            return None
+            print(f"Could not calculate gap statistic for k={k}: {e}", flush=True)
+            return None, None
+
+    def _within_cluster_dispersion(self, data, labels, k):
+        """Calculate within-cluster dispersion (sum of squared distances to centroids)"""
+        total_dispersion = 0
+        for cluster_id in range(k):
+            cluster_mask = labels == cluster_id
+            if np.sum(cluster_mask) > 0:
+                cluster_data = data[cluster_mask]
+                if len(cluster_data) > 1:
+                    cluster_center = np.mean(cluster_data, axis=0)
+                    cluster_dispersion = np.sum((cluster_data - cluster_center) ** 2)
+                    total_dispersion += cluster_dispersion
+        return total_dispersion
+
+    def _find_optimal_k_gap(self, k_values):
+        """Find optimal k using Tibshirani gap rule"""
+        try:
+            gap_stats = [self.cluster_metrics[k]["gap_statistic"] for k in k_values]
+            gap_stds = [self.cluster_metrics[k]["gap_std"] for k in k_values]
+
+            # Apply Tibshirani rule: choose smallest k such that Gap(k) >= Gap(k+1) - s_{k+1}
+            for i, k in enumerate(k_values[:-1]):
+                gap_k = gap_stats[i]
+                gap_k_plus_1 = gap_stats[i + 1]
+                std_k_plus_1 = gap_stds[i + 1]
+
+                if gap_k >= (gap_k_plus_1 - std_k_plus_1):
+                    return k
+
+            # If no k satisfies the rule, return the k with maximum gap
+            max_gap_idx = np.argmax(gap_stats)
+            return k_values[max_gap_idx]
+
+        except Exception as e:
+            print(f"Could not apply Tibshirani rule: {e}", flush=True)
+            # Fallback to maximum gap
+            gap_stats = [self.cluster_metrics[k]["gap_statistic"] for k in k_values]
+            max_gap_idx = np.argmax(gap_stats)
+            return k_values[max_gap_idx]
 
     def group_participants_by_hierarchical_connectivity(self, n_clusters=None):
         """Group participants based on hierarchical clustering of voxel connectivity patterns"""
@@ -415,18 +681,12 @@ class HierarchicalConnectivityClustering:
         except Exception:
             pass
 
-        # Calculate inertia
-        inertia_hierarchical = self._calculate_hierarchical_inertia(
-            group_labels, n_clusters
-        )
-
         self.voxel_connectivity_groups[n_clusters] = {
             "method": "hierarchical",
             "labels": group_labels,
             "linkage_matrix": linkage_matrix,
             "silhouette_score": silhouette,
             "cophenetic_correlation": coph_corr,
-            "inertia": inertia_hierarchical,
             "n_participants_per_group": np.bincount(group_labels),
             "distance_matrix": Dfull,
         }
@@ -437,8 +697,6 @@ class HierarchicalConnectivityClustering:
         print(f"  Method: {group_info['method']}", flush=True)
         print(f"  Number of groups: {n_clusters}", flush=True)
         print(f"  Silhouette score: {group_info['silhouette_score']:.3f}", flush=True)
-        if inertia_hierarchical is not None:
-            print(f"  Inertia: {inertia_hierarchical:.3f}", flush=True)
         print(
             f"  Participants per group: {group_info['n_participants_per_group']}",
             flush=True,
@@ -492,86 +750,36 @@ class HierarchicalConnectivityClustering:
         group_info = self.voxel_connectivity_groups[n_clusters]
         labels = group_info["labels"]
 
-        # Create comprehensive visualization
-        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+        # Create main visualization (PCA and group sizes)
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
         # 1. PCA visualization
         pca = PCA(n_components=2)
         data_2d = pca.fit_transform(self.data_matrix)
 
-        scatter = axes[0, 0].scatter(
+        scatter = axes[0].scatter(
             data_2d[:, 0], data_2d[:, 1], c=labels, cmap="tab10", alpha=0.7, s=50
         )
-        axes[0, 0].set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.1%} variance)")
-        axes[0, 0].set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.1%} variance)")
-        axes[0, 0].set_title(f"Hierarchical Groups in PCA Space (k={n_clusters})")
-        plt.colorbar(scatter, ax=axes[0, 0])
+        axes[0].set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.1%} variance)")
+        axes[0].set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.1%} variance)")
+        axes[0].set_title(f"Hierarchical Groups in PCA Space (k={n_clusters})")
+        plt.colorbar(scatter, ax=axes[0])
 
         # 2. Group sizes
         unique, counts = np.unique(labels, return_counts=True)
-        bars = axes[0, 1].bar(
-            unique, counts, alpha=0.7, color="skyblue", edgecolor="navy"
-        )
-        axes[0, 1].set_xlabel("Group ID")
-        axes[0, 1].set_ylabel("Number of Participants")
-        axes[0, 1].set_title(f"Hierarchical Group Sizes (k={n_clusters})")
+        bars = axes[1].bar(unique, counts, alpha=0.7, color="skyblue", edgecolor="navy")
+        axes[1].set_xlabel("Group ID")
+        axes[1].set_ylabel("Number of Participants")
+        axes[1].set_title(f"Hierarchical Group Sizes (k={n_clusters})")
         # Add count labels on bars
         for bar, count in zip(bars, counts):
-            axes[0, 1].text(
+            axes[1].text(
                 bar.get_x() + bar.get_width() / 2,
                 bar.get_height() + 0.1,
                 str(count),
                 ha="center",
                 va="bottom",
             )
-
-        # 3. Silhouette analysis
-        silhouette_vals = silhouette_samples(
-            group_info["distance_matrix"], labels, metric="precomputed"
-        )
-        avg_score = group_info["silhouette_score"]
-
-        y_lower = 10
-        for i in range(n_clusters):
-            cluster_silhouette_vals = silhouette_vals[labels == i]
-            cluster_silhouette_vals.sort()
-
-            size_cluster_i = cluster_silhouette_vals.shape[0]
-            y_upper = y_lower + size_cluster_i
-
-            color = plt.cm.tab10(i / n_clusters)
-            axes[1, 0].fill_betweenx(
-                np.arange(y_lower, y_upper),
-                0,
-                cluster_silhouette_vals,
-                facecolor=color,
-                edgecolor=color,
-                alpha=0.7,
-            )
-
-            axes[1, 0].text(-0.05, y_lower + 0.5 * size_cluster_i, str(i))
-            y_lower = y_upper + 10
-
-        axes[1, 0].set_xlabel("Silhouette Coefficient Values")
-        axes[1, 0].set_ylabel("Group Label")
-        axes[1, 0].set_title("Silhouette Analysis")
-
-        # Add vertical line for average silhouette score
-        axes[1, 0].axvline(
-            x=avg_score,
-            color="red",
-            linestyle="--",
-            label=f"Average Score: {avg_score:.3f}",
-        )
-        axes[1, 0].legend()
-
-        # 4. Dendrogram
-        dendrogram(
-            group_info["linkage_matrix"], ax=axes[1, 1], truncate_mode="level", p=10
-        )
-        axes[1, 1].set_title("Hierarchical Clustering Dendrogram")
-        axes[1, 1].set_xlabel("Sample Index")
-        axes[1, 1].set_ylabel("Distance")
 
         plt.tight_layout()
         plt.savefig(
@@ -581,7 +789,7 @@ class HierarchicalConnectivityClustering:
             dpi=300,
             bbox_inches="tight",
         )
-        plt.show()
+        plt.close()  # Close the figure to free memory
 
         return self
 
@@ -606,10 +814,27 @@ class HierarchicalConnectivityClustering:
 
         # Get results for this k
         group_info = self.voxel_connectivity_groups[k_value]
-        inertia_value = group_info.get("inertia")
+
+        # Calculate gap statistic for this k
+        group_labels = group_info["labels"]
+        gap_stat, gap_std = self._calculate_gap_statistic(k_value, group_labels)
+
+        # Add gap statistics to the group info
+        if gap_stat is not None:
+            self.voxel_connectivity_groups[k_value]["gap_statistic"] = gap_stat
+            self.voxel_connectivity_groups[k_value]["gap_std"] = gap_std
 
         # Create visualizations for this k
         self.visualize_hierarchical_clustering(n_clusters=k_value)
+
+        # Restore original output directories before saving results
+        self.output_dir = original_output_dir
+        self.figures_dir = original_figures_dir
+
+        # Thread-safe append to validation DataFrame
+        self._append_to_validation_dataframe(
+            k_value, group_info["silhouette_score"], gap_stat, gap_std
+        )
 
         # Save results summary for this k
         results_file = op.join(k_output_dir, f"k{k_value}_results.txt")
@@ -617,24 +842,10 @@ class HierarchicalConnectivityClustering:
             f.write(f"Results for k={k_value}:\n")
             f.write(f"Method: {group_info['method']}\n")
             f.write(f"Silhouette score: {group_info['silhouette_score']:.3f}\n")
-            if inertia_value is not None:
-                f.write(f"Inertia: {inertia_value:.3f}\n")
-            if group_info.get("cophenetic_correlation") is not None:
-                f.write(
-                    f"Cophenetic correlation: {group_info['cophenetic_correlation']:.3f}\n"
-                )
-            f.write(
-                f"Participants per group: {group_info['n_participants_per_group']}\n"
-            )
-
-        # Also save a copy in the main output directory for the summary script
-        main_results_file = op.join(original_output_dir, f"k{k_value}_results.txt")
-        with open(main_results_file, "w") as f:
-            f.write(f"Results for k={k_value}:\n")
-            f.write(f"Method: {group_info['method']}\n")
-            f.write(f"Silhouette score: {group_info['silhouette_score']:.3f}\n")
-            if inertia_value is not None:
-                f.write(f"Inertia: {inertia_value:.3f}\n")
+            if group_info.get("gap_statistic") is not None:
+                f.write(f"gap_statistic: {group_info['gap_statistic']:.3f}\n")
+            if group_info.get("gap_std") is not None:
+                f.write(f"gap_std: {group_info['gap_std']:.3f}\n")
             if group_info.get("cophenetic_correlation") is not None:
                 f.write(
                     f"Cophenetic correlation: {group_info['cophenetic_correlation']:.3f}\n"
@@ -649,7 +860,6 @@ class HierarchicalConnectivityClustering:
 
         print(f"Single k hierarchical analysis completed for k={k_value}", flush=True)
         print(f"Results saved to: {k_output_dir}", flush=True)
-        print(f"Summary copy saved to: {main_results_file}", flush=True)
 
         return self
 
@@ -685,6 +895,7 @@ class HierarchicalConnectivityClustering:
         print("  - Cluster validation plots", flush=True)
         print("  - Group assignment files", flush=True)
         print("  - Visualization plots", flush=True)
+        print("  - Dendrogram in figures/", flush=True)
 
 
 def main():

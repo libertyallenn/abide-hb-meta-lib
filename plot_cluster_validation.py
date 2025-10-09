@@ -16,6 +16,7 @@ import os.path as op
 import re
 import glob
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 
 
@@ -29,7 +30,7 @@ def get_parser():
     )
     p.add_argument(
         "--output_dir",
-        help="Directory to save plots (default: results_dir/validation_plots)",
+        help="Directory to save plots",
     )
     p.add_argument(
         "--k_min",
@@ -83,22 +84,21 @@ def parse_results_file(filepath):
         if sil_match:
             metrics["silhouette"] = float(sil_match.group(1))
 
-        # Extract inertia (elbow metric)
-        inertia_match = re.search(r"Inertia:\s*([\d\.-]+)", content)
-        if inertia_match:
-            metrics["inertia"] = float(inertia_match.group(1))
+        # Extract gap statistic
+        gap_match = re.search(r"gap_statistic:\s*([\d\.-]+)", content)
+        if gap_match:
+            metrics["gap_statistic"] = float(gap_match.group(1))
 
-        # Extract group sizes for calculating inertia proxy
+        # Extract gap standard error
+        gap_std_match = re.search(r"gap_std:\s*([\d\.-]+)", content)
+        if gap_std_match:
+            metrics["gap_std"] = float(gap_std_match.group(1))
+
+        # Extract group sizes
         groups_match = re.search(r"Participants per group:\s*\[(.*?)\]", content)
         if groups_match:
             group_sizes = [int(x.strip()) for x in groups_match.group(1).split()]
             metrics["group_sizes"] = group_sizes
-            # Calculate a simple dispersion metric as inertia proxy
-            total_participants = sum(group_sizes)
-            if total_participants > 0:
-                # Normalized variance of group sizes (higher = more uneven split)
-                variance = np.var(group_sizes) / (total_participants**2)
-                metrics["group_variance"] = variance
 
     except Exception as e:
         print(f"Warning: Could not parse {filepath}: {e}")
@@ -107,15 +107,50 @@ def parse_results_file(filepath):
 
 
 def collect_all_results(results_dir, k_min=2, k_max=10):
-    """Collect results from all k*_results.txt files"""
+    """Collect results from all k*_results.txt files or DataFrame CSV"""
     print(f"Collecting results from: {results_dir}")
 
+    # First try to load from validation DataFrame CSV
+    csv_file = op.join(results_dir, "cluster_validation_metrics.csv")
+    if op.exists(csv_file):
+        print(f"Found validation DataFrame: {csv_file}")
+        try:
+            df = pd.read_csv(csv_file)
+            # Filter by k range
+            df = df[(df["k"] >= k_min) & (df["k"] <= k_max)]
+
+            # Convert to the expected format
+            all_metrics = []
+            for _, row in df.iterrows():
+                metrics = {
+                    "k": int(row["k"]),
+                    "method": "hierarchical",
+                    "silhouette": row.get("silhouette_score", np.nan),
+                    "gap_statistic": row.get("gap_statistic", np.nan),
+                    "gap_std": row.get("gap_std", np.nan),
+                }
+                all_metrics.append(metrics)
+
+                sil_score = metrics.get("silhouette", "N/A")
+                gap_val = metrics.get("gap_statistic", "N/A")
+                print(f"  k={metrics['k']}: silhouette={sil_score}, gap={gap_val}")
+
+            print(f"Loaded {len(all_metrics)} results from DataFrame")
+            return sorted(all_metrics, key=lambda x: x["k"])
+
+        except Exception as e:
+            print(f"Error reading DataFrame CSV: {e}")
+            print("Falling back to individual k*_results.txt files...")
+
+    # Fallback to original method with individual files
     # Find all k*_results.txt files
     pattern = op.join(results_dir, "k*_results.txt")
     result_files = glob.glob(pattern)
 
     if not result_files:
-        raise FileNotFoundError(f"No k*_results.txt files found in {results_dir}")
+        raise FileNotFoundError(
+            f"No k*_results.txt files or validation CSV found in {results_dir}"
+        )
 
     print(f"Found {len(result_files)} result files")
 
@@ -127,10 +162,8 @@ def collect_all_results(results_dir, k_min=2, k_max=10):
             if k_min <= metrics["k"] <= k_max:
                 all_metrics.append(metrics)
                 sil_score = metrics.get("silhouette", "N/A")
-                inertia_val = metrics.get("inertia", "N/A")
-                print(
-                    f"  k={metrics['k']}: silhouette={sil_score}, inertia={inertia_val}"
-                )
+                gap_val = metrics.get("gap_statistic", "N/A")
+                print(f"  k={metrics['k']}: silhouette={sil_score}, gap={gap_val}")
 
     # Sort by k value
     all_metrics.sort(key=lambda x: x["k"])
@@ -178,30 +211,45 @@ def plot_validation_metrics(all_metrics, output_dir, figsize=(12, 5), dpi=300):
             best_k = valid_k[best_idx]
             best_score = valid_sil[best_idx]
             axes[0].axvline(best_k, color="red", linestyle="--", alpha=0.7)
+
+            # Position annotation based on plot area
+            y_range = axes[0].get_ylim()
+            y_offset = (y_range[1] - y_range[0]) * 0.05  # 5% of y-range
+
             axes[0].annotate(
                 f"Best k={best_k}\nScore={best_score:.3f}",
                 xy=(best_k, best_score),
-                xytext=(best_k + 0.3, best_score + 0.01),
+                xytext=(best_k + 0.5, best_score + y_offset),
                 arrowprops=dict(arrowstyle="->", color="red"),
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
+                fontsize=10,
             )
 
-    # Plot 2: Inertia (Elbow analysis)
+    # Plot 2: Gap Statistic
     if len(axes) > 1:
-        inertia_values = [m.get("inertia", np.nan) for m in all_metrics]
-        has_inertia = not all(np.isnan(inertia_values))
+        gap_values = [m.get("gap_statistic", np.nan) for m in all_metrics]
+        gap_stds = [m.get("gap_std", np.nan) for m in all_metrics]
+        has_gap = not all(np.isnan(gap_values))
 
-        if has_inertia:
-            valid_indices = ~np.isnan(inertia_values)
+        if has_gap:
+            valid_indices = ~np.isnan(gap_values)
             valid_k = np.array(k_values)[valid_indices]
-            valid_inertia = np.array(inertia_values)[valid_indices]
+            valid_gap = np.array(gap_values)[valid_indices]
+            valid_gap_std = np.array(gap_stds)[valid_indices]
 
-            axes[1].plot(
-                valid_k, valid_inertia, "o-", linewidth=2, markersize=6, color="green"
+            axes[1].errorbar(
+                valid_k,
+                valid_gap,
+                yerr=valid_gap_std,
+                fmt="o-",
+                linewidth=2,
+                markersize=6,
+                color="green",
+                capsize=5,
             )
             axes[1].set_xlabel("Number of Clusters (k)")
-            axes[1].set_ylabel("Inertia (Within-cluster sum of squares)")
-            axes[1].set_title("Elbow Method")
+            axes[1].set_ylabel("Gap Statistic")
+            axes[1].set_title("Gap Statistic Analysis")
             axes[1].grid(True, alpha=0.3)
             axes[1].set_xticks(valid_k)
         else:
@@ -240,61 +288,9 @@ def plot_validation_metrics(all_metrics, output_dir, figsize=(12, 5), dpi=300):
     plt.savefig(output_file, dpi=dpi, bbox_inches="tight")
     print(f"Validation plot saved to: {output_file}")
 
-    # Also save as PDF
-    pdf_file = op.join(output_dir, "cluster_validation_summary.pdf")
-    plt.savefig(pdf_file, bbox_inches="tight")
-    print(f"PDF version saved to: {pdf_file}")
-
     plt.show()
 
     return output_file
-
-
-def create_summary_table(all_metrics, output_dir):
-    """Create a summary table of all results"""
-    print("Creating summary table...")
-
-    summary_file = op.join(output_dir, "cluster_validation_summary.txt")
-
-    with open(summary_file, "w") as f:
-        f.write("Cluster Validation Summary\n")
-        f.write("=" * 50 + "\n\n")
-
-        f.write(
-            f"{'k':<3} {'Method':<12} {'Silhouette':<12} {'Inertia':<12} {'Group Sizes':<15}\n"
-        )
-        f.write("-" * 60 + "\n")
-
-        for metrics in all_metrics:
-            k = metrics["k"]
-            method = metrics.get("method", "unknown")
-            silhouette = metrics.get("silhouette", np.nan)
-            inertia = metrics.get("inertia", np.nan)
-            group_sizes = metrics.get("group_sizes", [])
-
-            sil_str = f"{silhouette:.3f}" if not np.isnan(silhouette) else "N/A"
-            inertia_str = f"{inertia:.1f}" if not np.isnan(inertia) else "N/A"
-            sizes_str = str(group_sizes) if group_sizes else "N/A"
-
-            f.write(
-                f"{k:<3} {method:<12} {sil_str:<12} {inertia_str:<12} {sizes_str:<15}\n"
-            )
-
-        # Add recommendation
-        silhouette_scores = [m.get("silhouette", np.nan) for m in all_metrics]
-        if not all(np.isnan(silhouette_scores)):
-            valid_scores = [
-                (i, s) for i, s in enumerate(silhouette_scores) if not np.isnan(s)
-            ]
-            if valid_scores:
-                best_idx, best_score = max(valid_scores, key=lambda x: x[1])
-                best_k = all_metrics[best_idx]["k"]
-                f.write(
-                    f"\nRecommended k: {best_k} (silhouette score: {best_score:.3f})\n"
-                )
-
-    print(f"Summary table saved to: {summary_file}")
-    return summary_file
 
 
 def main():
@@ -303,7 +299,8 @@ def main():
 
     # Set default output directory
     if args.output_dir is None:
-        args.output_dir = op.join(args.results_dir, "validation_plots")
+        default_dir = op.join("derivatives", "hierarchical_clustering", "figures")
+        args.output_dir = default_dir
 
     print("Cluster Validation Plotting Tool")
     print("=" * 40)
@@ -320,12 +317,9 @@ def main():
             return 1
 
         # Create plots
-        plot_file = plot_validation_metrics(
+        plot_validation_metrics(
             all_metrics, args.output_dir, figsize=args.figsize, dpi=args.dpi
         )
-
-        # Create summary table
-        summary_file = create_summary_table(all_metrics, args.output_dir)
 
         print("\nSUCCESS!")
         print(f"Processed {len(all_metrics)} cluster solutions")

@@ -1,6 +1,7 @@
 Results for k=9:
 Method: hierarchical
 Silhouette score: 0.001
-Inertia: 144916262.000
+gap_statistic: 2.201
+gap_std: 0.000
 Cophenetic correlation: 0.258
 Participants per group: [ 53 102  83  65  58 147  65  39  93]
