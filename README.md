@@ -55,13 +55,14 @@ The validation plots show both metrics across k=2 to k=8, with clear annotations
 
 Top-level scripts and important files in this directory:
 
+- `1-run_data-matrix.sh` / `run_data-matrix.sh` — Preprocessing wrapper to create the data matrix (numbered: 1-run_data-matrix.sh).
+- `2-run_hierarchical.sh` / `run_hierarchical.sh` — Shell wrapper for running `hierarchical-workflow.py` on HPC clusters or locally (numbered: 2-run_hierarchical.sh).
+- `3-run_plot-validation.sh` / `run_plot-validation.sh` — Script to generate cluster validation plots (numbered: 3-run_plot-validation.sh).
+- `run_kmeans.sh` — Optional wrapper to run the K-means workflow (`kmeans-workflow.py`) if you prefer that method.
 - `hierarchical-workflow.py` — Main hierarchical clustering pipeline: loads connectivity maps, performs Ward hierarchical clustering, calculates validation metrics, and generates comprehensive outputs.
 - `plot_cluster_validation.py` — Creates validation plots showing silhouette scores and gap statistics across k values to help determine optimal cluster solutions.
 - `utils.py` — Helper functions used by the workflows (masking, thresholding, I/O helpers).
 - `kmeans_env.yml` — Conda environment specification for reproducing the analysis environment.
-- `1-run_data-matrix.sh` / `run_data-matrix.sh` — Preprocessing wrapper to create the data matrix (numbered: 1-run_data-matrix.sh).
-- `2-run_hierarchical.sh` / `run_hierarchical.sh` — Shell wrapper for running `hierarchical-workflow.py` on HPC clusters or locally (numbered: 2-run_hierarchical.sh).
-- `3-run_plot-validation.sh` / `run_plot-validation.sh` — Script to generate cluster validation plots (numbered: 3-run_plot-validation.sh).
 - `derivatives/` — Output directory containing results:
   - `hierarchical_clustering/` — Main results directory
     - `k_2/` to `k_8/` — Individual cluster solutions
@@ -70,7 +71,6 @@ Top-level scripts and important files in this directory:
 
 ### Optional / alternative workflows
 - `kmeans-workflow.py` — Optional K-means clustering workflow. This is provided as an alternative to the hierarchical pipeline; use `run_kmeans.sh` to run it. It is not part of the numbered wrapper ordering by default.
-- `clustering-workflow.py` — Alternative clustering driver (experimental)
 
 ## Repository structure (quick file map)
 
