@@ -13,7 +13,7 @@
 #SBATCH --error=/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta/log/%x/%x_%A-%a.err
 # ------------------------------------------
 # Parallel Hierarchical Clustering - Each job runs one k value
-# Submit with: sbatch run_hierarchical.sh
+# Submit with: sbatch 2-run_hierarchical.sh
 # Monitor with: squeue -u $USER
 # Results collected automatically when all jobs complete
 

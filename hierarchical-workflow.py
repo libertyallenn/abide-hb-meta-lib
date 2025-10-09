@@ -929,7 +929,7 @@ def main():
         ).save_preprocessed_data()
         print("Preprocessing completed. Data matrix saved.", flush=True)
         print(
-            "Now submit clustering jobs with: sbatch run_hierarchical.sh",
+            "Now submit clustering jobs with: sbatch 2-run_hierarchical.sh",
             flush=True,
         )
         return

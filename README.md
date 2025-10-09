@@ -59,17 +59,31 @@ Top-level scripts and important files in this directory:
 - `plot_cluster_validation.py` — Creates validation plots showing silhouette scores and gap statistics across k values to help determine optimal cluster solutions.
 - `utils.py` — Helper functions used by the workflows (masking, thresholding, I/O helpers).
 - `kmeans_env.yml` — Conda environment specification for reproducing the analysis environment.
-- `run_hierarchical.sh` — Shell wrapper for running `hierarchical-workflow.py` on HPC clusters or locally.
-- `run_plot-validation.sh` — Script to generate cluster validation plots.
+- `1-run_data-matrix.sh` / `run_data-matrix.sh` — Preprocessing wrapper to create the data matrix (numbered: 1-run_data-matrix.sh).
+- `2-run_hierarchical.sh` / `run_hierarchical.sh` — Shell wrapper for running `hierarchical-workflow.py` on HPC clusters or locally (numbered: 2-run_hierarchical.sh).
+- `3-run_plot-validation.sh` / `run_plot-validation.sh` — Script to generate cluster validation plots (numbered: 3-run_plot-validation.sh).
 - `derivatives/` — Output directory containing results:
   - `hierarchical_clustering/` — Main results directory
     - `k_2/` to `k_8/` — Individual cluster solutions
     - `figures/` — Validation plots and dendrograms
     - `cluster_validation_metrics.csv` — Combined validation metrics DataFrame
 
-### Legacy Files
-- `kmeans-workflow.py` — Original K-means clustering approach (deprecated in favor of hierarchical clustering)
+### Optional / alternative workflows
+- `kmeans-workflow.py` — Optional K-means clustering workflow. This is provided as an alternative to the hierarchical pipeline; use `run_kmeans.sh` to run it. It is not part of the numbered wrapper ordering by default.
 - `clustering-workflow.py` — Alternative clustering driver (experimental)
+
+## Repository structure (quick file map)
+
+Top-level scripts you'll likely use (numbered wrappers are recommended):
+
+- `1-run_data-matrix.sh` — Create the preprocessed data matrix (preprocessing; run once).
+- `2-run_hierarchical.sh` — Parallel hierarchical clustering wrapper (recommended for the main pipeline).
+- `3-run_plot-validation.sh` — Generate cluster validation plots from the hierarchical results.
+- `run_kmeans.sh` — Optional: run the K-means workflow (`kmeans-workflow.py`) as a replacement to hierarchical clustering if you prefer that method.
+
+Notes:
+- Numbered wrappers (1,2,3) are provided for a clear execution order; the original unnumbered scripts are still present for backwards compatibility but the README and workflow now recommend the numbered names.
+- The K-means workflow is optional — if you prefer k-means clustering instead of the hierarchical approach, run `run_kmeans.sh` / `kmeans-workflow.py` and inspect the outputs under `derivatives/k_clustering/`.
 
 ---
 
@@ -163,7 +177,7 @@ python hierarchical-workflow.py \
 
 # Step 2: Submit parallel jobs for each k value
 for k in {2..8}; do
-    sbatch --export=K_VALUE=$k run_hierarchical.sh
+  sbatch --export=K_VALUE=$k 2-run_hierarchical.sh
 done
 ```
 
@@ -181,14 +195,14 @@ python plot_cluster_validation.py \
 ### Wrapper Scripts (HPC/Local)
 
 ```bash
-# Run complete workflow locally
-bash run_hierarchical.sh
+# Run complete workflow locally (numbered wrappers)
+bash 2-run_hierarchical.sh
 
 # Generate validation plots
-bash run_plot-validation.sh
+bash 3-run_plot-validation.sh
 
-# Submit to SLURM cluster
-sbatch run_hierarchical.sh
+# Submit to SLURM cluster using numbered wrapper
+sbatch 2-run_hierarchical.sh
 ```
 
 ### Using the Results

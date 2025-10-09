@@ -13,7 +13,7 @@
 #SBATCH --error=/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta/log/%x/%x_%j.err
 # ------------------------------------------
 # Plot cluster validation metrics from parallel clustering results
-# Submit with: sbatch run_plot_validation.sh
+# Submit with: sbatch 3-run_plot-validation.sh
 # Monitor with: squeue -u $USER
 
 pwd; hostname; date
@@ -47,8 +47,7 @@ source activate /home/champ007/kmeans_env
 # Run the plotting script
 cmd="python -u ${PROJECT_DIR}/plot_cluster_validation.py \
     --results_dir ${OUTPUT_DIR} \
-    --k_min ${K_MIN} \
-    --k_max ${K_MAX} \
+    --k_min ${K_MIN} --k_max ${K_MAX} \
     --figsize ${FIGSIZE_W} ${FIGSIZE_H} \
     --dpi ${DPI}"
 

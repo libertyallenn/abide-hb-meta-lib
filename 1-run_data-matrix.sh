@@ -13,7 +13,7 @@
 #SBATCH --error=/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta/log/%x/%x_%j.err
 # ------------------------------------------
 # Preprocessing step: Create data matrix once
-# Submit with: sbatch run_data-matrix.sh
+# Submit with: sbatch 1-run_data-matrix.sh
 
 pwd; hostname; date
 set -e
@@ -48,7 +48,7 @@ echo "==================================================="
 echo "PREPROCESSING COMPLETED"
 echo "Data matrix saved to: ${OUTPUT_DIR}/clustering_data_matrix.npy"
 echo "Metadata saved to: ${OUTPUT_DIR}/clustering_metadata.json"
-echo "Now submit parallel hierarchical clustering: sbatch run_hierarchical.sh"
+echo "Now submit parallel hierarchical clustering: sbatch 2-run_hierarchical.sh"
 echo "==================================================="
 
 date
