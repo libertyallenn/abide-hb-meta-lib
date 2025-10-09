@@ -226,7 +226,7 @@ class HierarchicalConnectivityClustering:
         print(f"Participants: {len(self.df)}", flush=True)
 
         # Create dendrogram once after data matrix is loaded
-        self._create_dendrogram_once()
+        # self._create_dendrogram_once()
 
         return self
 
@@ -368,7 +368,136 @@ class HierarchicalConnectivityClustering:
             f.write(f"  Tibshirani Gap rule: k={optimal_k_gap}\n")
 
         print(f"\nValidation scores saved to {results_path}", flush=True)
+
+        # Create and save validation DataFrame
+        self._create_validation_dataframe()
+
         return self
+
+    def _create_validation_dataframe(self):
+        """Create DataFrame with k values, silhouette scores, and gap statistics"""
+        print("Creating validation metrics DataFrame...", flush=True)
+
+        # Prepare data for DataFrame
+        validation_data = []
+        for k in sorted(self.cluster_metrics.keys()):
+            metrics = self.cluster_metrics[k]
+            validation_data.append(
+                {
+                    "k": k,
+                    "silhouette_score": metrics.get("silhouette", None),
+                    "gap_statistic": metrics.get("gap_statistic", None),
+                    "gap_std": metrics.get("gap_std", None),
+                }
+            )
+
+        # Create DataFrame
+        self.validation_df = pd.DataFrame(validation_data)
+
+        # Save DataFrame with thread-safe approach
+        self._save_validation_dataframe(self.validation_df)
+
+        return self.validation_df
+
+    def _save_validation_dataframe(self, df):
+        """Save validation DataFrame to CSV with thread-safe file locking"""
+        import fcntl
+        import time
+
+        csv_file = op.join(self.output_dir, "cluster_validation_metrics.csv")
+        lock_file = csv_file + ".lock"
+
+        max_attempts = 10
+        for attempt in range(max_attempts):
+            try:
+                # Create lock file and acquire exclusive lock
+                with open(lock_file, "w") as lock:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+                    # Save the DataFrame
+                    df.to_csv(csv_file, index=False)
+                    print(f"Validation DataFrame saved to: {csv_file}", flush=True)
+                    print(f"DataFrame shape: {df.shape}", flush=True)
+                    break
+
+            except (IOError, OSError) as e:
+                if attempt < max_attempts - 1:
+                    time.sleep(0.1 * (attempt + 1))  # Exponential backoff
+                    continue
+                else:
+                    print(
+                        f"Failed to save DataFrame after {max_attempts} attempts: {e}",
+                        flush=True,
+                    )
+
+        # Clean up lock file
+        try:
+            if op.exists(lock_file):
+                os.remove(lock_file)
+        except:
+            pass
+
+    def _append_to_validation_dataframe(
+        self, k_value, silhouette_score, gap_stat, gap_std
+    ):
+        """Thread-safe method to append single k results to validation DataFrame"""
+        import fcntl
+        import time
+
+        csv_file = op.join(self.output_dir, "cluster_validation_metrics.csv")
+        lock_file = csv_file + ".lock"
+
+        # New row to add
+        new_row = {
+            "k": k_value,
+            "silhouette_score": silhouette_score,
+            "gap_statistic": gap_stat,
+            "gap_std": gap_std,
+        }
+
+        max_attempts = 10
+        for attempt in range(max_attempts):
+            try:
+                # Create lock file and acquire exclusive lock
+                with open(lock_file, "w") as lock:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+                    # Load existing DataFrame or create new one
+                    if op.exists(csv_file):
+                        existing_df = pd.read_csv(csv_file)
+                        # Remove any existing row for this k value
+                        existing_df = existing_df[existing_df["k"] != k_value]
+                        # Add new row
+                        updated_df = pd.concat(
+                            [existing_df, pd.DataFrame([new_row])], ignore_index=True
+                        )
+                    else:
+                        updated_df = pd.DataFrame([new_row])
+
+                    # Sort by k value and save
+                    updated_df = updated_df.sort_values("k").reset_index(drop=True)
+                    updated_df.to_csv(csv_file, index=False)
+
+                    print(f"Updated validation DataFrame with k={k_value}", flush=True)
+                    print(f"Current DataFrame shape: {updated_df.shape}", flush=True)
+                    break
+
+            except (IOError, OSError) as e:
+                if attempt < max_attempts - 1:
+                    time.sleep(0.1 * (attempt + 1))  # Exponential backoff
+                    continue
+                else:
+                    print(
+                        f"Failed to update DataFrame after {max_attempts} attempts: {e}",
+                        flush=True,
+                    )
+
+        # Clean up lock file
+        try:
+            if op.exists(lock_file):
+                os.remove(lock_file)
+        except:
+            pass
 
     def _corr_embed(self):
         """
@@ -409,7 +538,6 @@ class HierarchicalConnectivityClustering:
             dpi=300,
             bbox_inches="tight",
         )
-        plt.show()
         plt.close()
 
         print(
@@ -661,12 +789,7 @@ class HierarchicalConnectivityClustering:
             dpi=300,
             bbox_inches="tight",
         )
-        plt.show()
-
-        # Create separate dendrogram figure (only once, not k-specific)
-        if not hasattr(self, "_dendrogram_created"):
-            self._create_dendrogram_figure(group_info, n_clusters)
-            self._dendrogram_created = True
+        plt.close()  # Close the figure to free memory
 
         return self
 
@@ -704,27 +827,18 @@ class HierarchicalConnectivityClustering:
         # Create visualizations for this k
         self.visualize_hierarchical_clustering(n_clusters=k_value)
 
+        # Restore original output directories before saving results
+        self.output_dir = original_output_dir
+        self.figures_dir = original_figures_dir
+
+        # Thread-safe append to validation DataFrame
+        self._append_to_validation_dataframe(
+            k_value, group_info["silhouette_score"], gap_stat, gap_std
+        )
+
         # Save results summary for this k
         results_file = op.join(k_output_dir, f"k{k_value}_results.txt")
         with open(results_file, "w") as f:
-            f.write(f"Results for k={k_value}:\n")
-            f.write(f"Method: {group_info['method']}\n")
-            f.write(f"Silhouette score: {group_info['silhouette_score']:.3f}\n")
-            if group_info.get("gap_statistic") is not None:
-                f.write(f"gap_statistic: {group_info['gap_statistic']:.3f}\n")
-            if group_info.get("gap_std") is not None:
-                f.write(f"gap_std: {group_info['gap_std']:.3f}\n")
-            if group_info.get("cophenetic_correlation") is not None:
-                f.write(
-                    f"Cophenetic correlation: {group_info['cophenetic_correlation']:.3f}\n"
-                )
-            f.write(
-                f"Participants per group: {group_info['n_participants_per_group']}\n"
-            )
-
-        # Also save a copy in the main output directory for the summary script
-        main_results_file = op.join(original_output_dir, f"k{k_value}_results.txt")
-        with open(main_results_file, "w") as f:
             f.write(f"Results for k={k_value}:\n")
             f.write(f"Method: {group_info['method']}\n")
             f.write(f"Silhouette score: {group_info['silhouette_score']:.3f}\n")
@@ -746,7 +860,6 @@ class HierarchicalConnectivityClustering:
 
         print(f"Single k hierarchical analysis completed for k={k_value}", flush=True)
         print(f"Results saved to: {k_output_dir}", flush=True)
-        print(f"Summary copy saved to: {main_results_file}", flush=True)
 
         return self
 

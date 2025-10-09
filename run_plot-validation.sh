@@ -62,8 +62,6 @@ if [[ $? -eq 0 ]]; then
     echo "Plots saved to: ${OUTPUT_DIR}/figures/"
     echo "Files generated:"
     echo "  - cluster_validation_summary.png"
-    echo "  - cluster_validation_summary.pdf"
-    echo "  - cluster_validation_summary.txt"
     echo "==================================================="
 else
     echo "==================================================="
