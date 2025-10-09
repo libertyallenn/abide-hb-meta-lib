@@ -1,0 +1,18 @@
+Hierarchical Connectivity Clustering - Parallel Results Summary
+Generated on: Thu Oct  9 13:04:00 EDT 2025
+K range tested: 2 to 9
+Method: hierarchical
+========================================
+
+WARNING: Results not found for k=2
+WARNING: Results not found for k=3
+WARNING: Results not found for k=4
+WARNING: Results not found for k=5
+WARNING: Results not found for k=6
+WARNING: Results not found for k=7
+WARNING: Results not found for k=8
+WARNING: Results not found for k=9
+
+========================================
+RECOMMENDATION:
+No valid results found!
