@@ -1,16 +1,16 @@
 #!/bin/bash
-#SBATCH --job-name=plot_validation
+#SBATCH --job-name=plot-validation
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem-per-cpu=2gb
+#SBATCH --cpus-per-task=10
+#SBATCH --mem-per-cpu=4gb
 #SBATCH --account=iacc_nbc
 #SBATCH --qos=pq_nbc
-#SBATCH --partition=IB_44C_512G
+#SBATCH --partition=default-alternate
 #SBATCH --time=00:30:00
 # Outputs ----------------------------------
-#SBATCH --output=/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta/log/%x/%x_%j.out
-#SBATCH --error=/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta/log/%x/%x_%j.err
+#SBATCH --output=/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta-lib/log/%x/%x_%j.out
+#SBATCH --error=/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta-lib/log/%x/%x_%j.err
 # ------------------------------------------
 # Plot cluster validation metrics from parallel clustering results
 # Submit with: sbatch 3-run_plot-validation.sh
@@ -21,7 +21,7 @@ set -e
 
 #==============Shell script==============#
 
-PROJECT_DIR="/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta"
+PROJECT_DIR="/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta-lib"
 OUTPUT_DIR=${PROJECT_DIR}/derivatives/hierarchical_clustering
 
 # Plotting parameters
@@ -42,7 +42,7 @@ echo "==================================================="
 
 # Load environment
 module load miniconda3-4.5.11-gcc-8.2.0-oqs2mbg
-source activate /home/champ007/kmeans_env
+source activate /home/lalle062/.conda/envs/clustering_env
 
 # Run the plotting script
 cmd="python -u ${PROJECT_DIR}/plot_cluster_validation.py \

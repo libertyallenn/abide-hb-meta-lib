@@ -1,16 +1,16 @@
 #!/bin/bash
-#SBATCH --job-name=hierarchical_clustering
+#SBATCH --job-name=hierarchical-clustering
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=12
+#SBATCH --cpus-per-task=10
 #SBATCH --mem-per-cpu=4gb
 #SBATCH --account=iacc_nbc
 #SBATCH --qos=pq_nbc
-#SBATCH --partition=IB_44C_512G
+#SBATCH --partition=default-alternate
 #SBATCH --array=2-9  # Job array for k values (k=2 through k=9, total 8 jobs)
 # Outputs ----------------------------------
-#SBATCH --output=/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta/log/%x/%x_%A-%a.out
-#SBATCH --error=/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta/log/%x/%x_%A-%a.err
+#SBATCH --output=/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta-lib/log/%x/%x_%A-%a.out
+#SBATCH --error=/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta-lib/log/%x/%x_%A-%a.err
 # ------------------------------------------
 # Parallel Hierarchical Clustering - Each job runs one k value
 # Submit with: sbatch 2-run_hierarchical.sh
@@ -22,7 +22,7 @@ set -e
 
 #==============Shell script==============#
 
-PROJECT_DIR="/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta"
+PROJECT_DIR="/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta-lib"
 OUTPUT_DIR=${PROJECT_DIR}/derivatives/hierarchical_clustering
 DATA_DIR="/home/data/nbc/Laird_ABIDE/dset/derivatives/rsfc-habenula"
 
@@ -40,7 +40,7 @@ echo "==================================================="
 
 # Load environment
 module load miniconda3-4.5.11-gcc-8.2.0-oqs2mbg
-source activate /home/champ007/kmeans_env
+source activate /home/lalle062/.conda/envs/clustering_env
 
 # Run the analysis for this k value (using preprocessed data)
 cmd="python -u ${PROJECT_DIR}/hierarchical-workflow.py \
