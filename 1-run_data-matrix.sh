@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=data-matrix
+#SBATCH --job-name=data-matrix #test
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=10
